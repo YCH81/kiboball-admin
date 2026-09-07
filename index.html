@@ -342,15 +342,22 @@ function groupRuns(rows) {
   }));
   withGame.sort((a, b) => (a.game?.game_date ?? "").localeCompare(b.game?.game_date ?? ""));
 
-  const runs = [];
+  // 先依「名稱＋主場」分組：同一天可能有兩隊各自的主題日，
+  // 若只照日期依序比對，兩檔會互相打斷，連續數天會被拆成好幾列。
+  const groups = new Map();
   for (const t of withGame) {
-    const last = runs[runs.length - 1];
-    if (last && last.title === t.title && last.homeCode === t.game?.home_code) {
-      last.items.push(t);
-    } else {
-      runs.push({ title: t.title, homeCode: t.game?.home_code, items: [t] });
-    }
+    const key = (t.game?.home_code ?? "") + "|" + t.title;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(t);
   }
+
+  const runs = [];
+  for (const items of groups.values()) {
+    runs.push({ title: items[0].title, homeCode: items[0].game?.home_code, items });
+  }
+  runs.sort((a, b) =>
+    (a.items[0].game?.game_date ?? "").localeCompare(b.items[0].game?.game_date ?? "")
+  );
   return runs;
 }
 
