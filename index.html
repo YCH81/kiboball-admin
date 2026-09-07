@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ki Bo Ball 主題日後台</title>
+<style>
+  :root {
+    --ink: #23201d; --muted: #6f6862; --faint: #a49c95;
+    --paper: #faf8f5; --surface: #fff; --line: #e6e1db;
+    --accent: #2f5d3f; --danger: #c0392b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink);
+         font: 15px/1.6 "Avenir Next", -apple-system, "Noto Sans TC", sans-serif; }
+  header { background: var(--surface); border-bottom: 1px solid var(--line);
+           padding: 14px 20px; display: flex; align-items: center; gap: 12px; }
+  header h1 { font-size: 16px; margin: 0; letter-spacing: .04em; }
+  header .who { margin-left: auto; color: var(--muted); font-size: 13px; }
+  main { max-width: 960px; margin: 0 auto; padding: 24px 20px 80px; }
+  section { background: var(--surface); border: 1px solid var(--line);
+            border-radius: 12px; padding: 20px; margin-bottom: 18px; }
+  h2 { font-size: 14px; margin: 0 0 14px; letter-spacing: .06em; color: var(--muted); }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 4px; }
+  input, select, textarea, button {
+    font: inherit; border-radius: 8px; border: 1px solid var(--line);
+    padding: 9px 11px; width: 100%; background: #fff; color: var(--ink);
+  }
+  textarea { min-height: 96px; resize: vertical; }
+  button { background: var(--accent); color: #fff; border: none; cursor: pointer;
+           font-weight: 600; letter-spacing: .04em; }
+  button.ghost { background: #fff; color: var(--ink); border: 1px solid var(--line); }
+  button.danger { background: var(--danger); }
+  button:disabled { opacity: .45; cursor: default; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .row > * { flex: 1; min-width: 160px; }
+  .actions { display: flex; gap: 10px; margin-top: 18px; }
+  .actions button { width: auto; padding: 10px 20px; }
+  .check { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
+  .check input { width: auto; }
+  .check label { margin: 0; color: var(--ink); font-size: 14px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; font-size: 12px; color: var(--muted);
+       font-weight: 600; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td .mini { display: flex; gap: 6px; }
+  td button { width: auto; padding: 5px 12px; font-size: 12px; }
+  .note { color: var(--muted); font-size: 13px; }
+  .msg { margin-top: 14px; font-size: 13px; padding: 10px 12px; border-radius: 8px; }
+  .msg.ok { background: #eaf3ec; color: var(--accent); }
+  .msg.err { background: #fbeceb; color: var(--danger); }
+  .hide { display: none; }
+  .sug { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+         margin-bottom: 8px; display: flex; align-items: center; gap: 12px; }
+  .sug .meta { color: var(--muted); font-size: 12px; }
+  .sug button { width: auto; padding: 5px 12px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Ki Bo Ball 主題日後台</h1>
+  <span class="who" id="who"></span>
+  <button class="ghost hide" id="signOut" style="width:auto;padding:6px 14px;font-size:13px">登出</button>
+</header>
+
+<main>
+
+<section id="loginPane">
+  <h2>登入</h2>
+  <p class="note">請以具備後台權限的帳號登入。</p>
+  <label for="email">Email</label>
+  <input id="email" type="email" autocomplete="username">
+  <label for="password">密碼</label>
+  <input id="password" type="password" autocomplete="current-password">
+  <div class="actions"><button id="signIn">登入</button></div>
+  <div id="loginMsg"></div>
+</section>
+
+<div id="app" class="hide">
+
+  <section>
+    <h2>建立 / 修改主題日</h2>
+    <div class="row">
+      <div>
+        <label for="year">年度</label>
+        <input id="year" inputmode="numeric">
+      </div>
+      <div style="flex:3">
+        <label for="game">比賽</label>
+        <select id="game"></select>
+      </div>
+    </div>
+
+    <label for="title">主題日名稱</label>
+    <input id="title" placeholder="例：涼水祭 — Bro's Water Park">
+
+    <label for="subtitle">副標（選填）</label>
+    <input id="subtitle" placeholder="例：洲際海水浴場限時開張">
+
+    <label for="bodyText">介紹內容（選填，顯示在 App 的主題日頁面）</label>
+    <textarea id="bodyText"></textarea>
+
+    <div class="row">
+      <div>
+        <label for="imageUrl">主視覺圖片網址（https，選填）</label>
+        <input id="imageUrl" placeholder="https://...">
+      </div>
+      <div>
+        <label for="ticketUrl">售票連結（https，選填）</label>
+        <input id="ticketUrl" placeholder="https://...">
+      </div>
+      <div style="max-width:150px">
+        <label for="accent">主色（選填）</label>
+        <input id="accent" placeholder="#E23B3B">
+      </div>
+    </div>
+
+    <div class="check">
+      <input type="checkbox" id="notify">
+      <label for="notify">同時推播給支持主場球隊的使用者</label>
+    </div>
+
+    <div class="actions">
+      <button id="save">儲存</button>
+      <button class="ghost" id="reset">清空</button>
+    </div>
+    <div id="saveMsg"></div>
+  </section>
+
+  <section>
+    <h2>已建立的主題日</h2>
+    <table>
+      <thead><tr><th>日期</th><th>場次</th><th>名稱</th><th></th></tr></thead>
+      <tbody id="themeRows"></tbody>
+    </table>
+    <p class="note hide" id="noThemes">尚未建立任何主題日。</p>
+  </section>
+
+  <section>
+    <h2>從球團官網匯入建議</h2>
+    <p class="note">
+      只有統一獅與中信兄弟的公告格式可解析，其餘球團請手動建立。
+      建議不會自動寫入，請確認後再套用。
+    </p>
+    <div class="actions"><button class="ghost" id="loadSug">讀取建議</button></div>
+    <div id="sugList"></div>
+    <div id="sugMsg"></div>
+  </section>
+
+</div>
+</main>
+
+<script type="module">
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+
+const SUPABASE_URL = "https://esbrnubeysdpkyzlitnd.supabase.co";
+const API = SUPABASE_URL + "/functions/v1/admin";
+const sb = createClient(SUPABASE_URL, "sb_publishable_CPjzZ6gsCD0r7DUML9vtAQ_mQVYifBY");
+
+const $ = (id) => document.getElementById(id);
+const show = (el, on) => el.classList.toggle("hide", !on);
+function say(target, text, ok) {
+  target.innerHTML = text ? '<div class="msg ' + (ok ? "ok" : "err") + '"></div>' : "";
+  if (text) target.firstChild.textContent = text;
+}
+
+let games = [];
+
+async function token() {
+  const { data } = await sb.auth.getSession();
+  return data.session ? data.session.access_token : null;
+}
+
+async function call(path, options) {
+  const jwt = await token();
+  const res = await fetch(API + path, Object.assign({}, options, {
+    headers: Object.assign(
+      { "content-type": "application/json", authorization: "Bearer " + jwt },
+      (options || {}).headers,
+    ),
+  }));
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(payload.error || ("HTTP " + res.status));
+  return payload;
+}
+
+// ---------------------------------------------------------------- 登入
+
+$("signIn").onclick = async () => {
+  say($("loginMsg"), "", true);
+  const { error } = await sb.auth.signInWithPassword({
+    email: $("email").value.trim(),
+    password: $("password").value,
+  });
+  if (error) return say($("loginMsg"), error.message, false);
+  await enter();
+};
+
+$("signOut").onclick = async () => { await sb.auth.signOut(); location.reload(); };
+
+async function enter() {
+  const { data } = await sb.auth.getUser();
+  if (!data.user) return;
+  $("who").textContent = data.user.email;
+  show($("loginPane"), false);
+  show($("app"), true);
+  show($("signOut"), true);
+  $("year").value = String(new Date().getFullYear());
+  await loadGames();
+  await loadThemes();
+}
+
+// ---------------------------------------------------------------- 比賽
+
+async function loadGames() {
+  try {
+    games = await call("/games?year=" + encodeURIComponent($("year").value));
+  } catch (e) {
+    return say($("saveMsg"), "讀取比賽失敗：" + e.message, false);
+  }
+  const select = $("game");
+  select.innerHTML = "";
+  for (const g of games) {
+    const option = document.createElement("option");
+    option.value = g.kind_code + "/" + g.game_sno;
+    option.textContent = g.game_date + "  #" + g.game_sno + "  " +
+      teamName(g.visiting_code) + " @ " + teamName(g.home_code) + "  " + (g.field || "");
+    select.appendChild(option);
+  }
+}
+
+const TEAMS = {
+  AAA011: "味全龍", ACN011: "中信兄弟", ADD011: "統一獅",
+  AEO011: "富邦悍將", AJL011: "樂天桃猿", AKP011: "台鋼雄鷹",
+};
+const teamName = (code) => TEAMS[code] || code;
+
+$("year").onchange = async () => { await loadGames(); await loadThemes(); };
+
+// ---------------------------------------------------------------- 主題日
+
+async function loadThemes() {
+  let rows = [];
+  try {
+    rows = await call("/themes?year=" + encodeURIComponent($("year").value));
+  } catch (e) {
+    return say($("saveMsg"), "讀取主題日失敗：" + e.message, false);
+  }
+  const body = $("themeRows");
+  body.innerHTML = "";
+  show($("noThemes"), rows.length === 0);
+
+  for (const t of rows) {
+    const game = games.find((g) => g.kind_code === t.kind_code && g.game_sno === t.game_sno);
+    const tr = document.createElement("tr");
+
+    const add = (text) => {
+      const td = document.createElement("td");
+      td.textContent = text;
+      tr.appendChild(td);
+      return td;
+    };
+    add(game ? game.game_date : "—");
+    add("#" + t.game_sno);
+    add(t.title);
+
+    const tools = document.createElement("td");
+    const wrap = document.createElement("div");
+    wrap.className = "mini";
+
+    const edit = document.createElement("button");
+    edit.className = "ghost";
+    edit.textContent = "編輯";
+    edit.onclick = () => fill(t);
+
+    const remove = document.createElement("button");
+    remove.className = "danger";
+    remove.textContent = "刪除";
+    remove.onclick = async () => {
+      if (!confirm("確定刪除「" + t.title + "」？")) return;
+      await call("/themes?year=" + t.year + "&kindCode=" + t.kind_code +
+                 "&gameSno=" + t.game_sno, { method: "DELETE" });
+      await loadThemes();
+    };
+
+    wrap.appendChild(edit);
+    wrap.appendChild(remove);
+    tools.appendChild(wrap);
+    tr.appendChild(tools);
+    body.appendChild(tr);
+  }
+}
+
+function fill(t) {
+  $("game").value = t.kind_code + "/" + t.game_sno;
+  $("title").value = t.title || "";
+  $("subtitle").value = t.subtitle || "";
+  $("bodyText").value = t.body || "";
+  $("imageUrl").value = t.image_url || "";
+  $("ticketUrl").value = t.ticket_url || "";
+  $("accent").value = t.accent || "";
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+$("reset").onclick = () => {
+  for (const id of ["title", "subtitle", "bodyText", "imageUrl", "ticketUrl", "accent"]) {
+    $(id).value = "";
+  }
+  $("notify").checked = false;
+  say($("saveMsg"), "", true);
+};
+
+$("save").onclick = async () => {
+  const picked = $("game").value.split("/");
+  if (!picked[1]) return say($("saveMsg"), "請先選擇比賽", false);
+  if (!$("title").value.trim()) return say($("saveMsg"), "請填寫主題日名稱", false);
+
+  $("save").disabled = true;
+  try {
+    const result = await call("/themes", {
+      method: "POST",
+      body: JSON.stringify({
+        year: $("year").value,
+        kindCode: picked[0],
+        gameSno: Number(picked[1]),
+        title: $("title").value,
+        subtitle: $("subtitle").value,
+        body: $("bodyText").value,
+        imageUrl: $("imageUrl").value,
+        ticketUrl: $("ticketUrl").value,
+        accent: $("accent").value,
+        notify: $("notify").checked,
+      }),
+    });
+    let text = "已儲存";
+    if (result.push && typeof result.push.sent === "number") {
+      text += "，推播送出 " + result.push.sent + " 台裝置";
+      if (result.push.failed) text += "（失敗 " + result.push.failed + "）";
+    } else if (result.push && result.push.error) {
+      text += "，但推播失敗：" + result.push.error;
+    }
+    say($("saveMsg"), text, true);
+    $("notify").checked = false;
+    await loadThemes();
+  } catch (e) {
+    say($("saveMsg"), "儲存失敗：" + e.message, false);
+  } finally {
+    $("save").disabled = false;
+  }
+};
+
+// ---------------------------------------------------------------- 匯入建議
+
+$("loadSug").onclick = async () => {
+  say($("sugMsg"), "", true);
+  $("sugList").innerHTML = "";
+  let result;
+  try {
+    result = await call("/suggestions?year=" + encodeURIComponent($("year").value));
+  } catch (e) {
+    return say($("sugMsg"), "讀取失敗：" + e.message, false);
+  }
+  if (result.problems && result.problems.length) {
+    say($("sugMsg"), "部分來源讀取失敗：" + result.problems.join("；"), false);
+  }
+  for (const s of result.suggestions) {
+    const box = document.createElement("div");
+    box.className = "sug";
+
+    const text = document.createElement("div");
+    text.style.flex = "1";
+    const name = document.createElement("div");
+    name.textContent = s.title;
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = teamName(s.homeCode) + " 主場 · " +
+      s.dates[0] + (s.dates.length > 1 ? " ~ " + s.dates[s.dates.length - 1] : "") +
+      " · " + s.source;
+    text.appendChild(name);
+    text.appendChild(meta);
+
+    const use = document.createElement("button");
+    use.className = "ghost";
+    use.textContent = "帶入表單";
+    use.onclick = () => {
+      const match = games.find((g) =>
+        g.home_code === s.homeCode && s.dates.indexOf(g.game_date) >= 0
+      );
+      if (!match) return say($("sugMsg"), "找不到「" + s.title + "」對應的比賽", false);
+      $("game").value = match.kind_code + "/" + match.game_sno;
+      $("title").value = s.title;
+      $("subtitle").value = "";
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    };
+
+    box.appendChild(text);
+    box.appendChild(use);
+    $("sugList").appendChild(box);
+  }
+};
+
+// ---------------------------------------------------------------- 啟動
+
+const { data: session } = await sb.auth.getSession();
+if (session.session) await enter();
+</script>
+</body>
+</html>
