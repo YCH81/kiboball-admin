@@ -55,6 +55,14 @@
          margin-bottom: 8px; display: flex; align-items: center; gap: 12px; }
   .sug .meta { color: var(--muted); font-size: 12px; }
   .sug button { width: auto; padding: 5px 12px; font-size: 12px; }
+  select[multiple] { height: 190px; padding: 6px; }
+  .hint { color: var(--faint); font-size: 12px; margin-top: 5px; }
+  .tag { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 99px;
+         background: #eef1ee; color: var(--muted); margin-left: 6px; }
+  .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end;
+             margin-bottom: 14px; }
+  .filters > div { flex: 1; min-width: 140px; }
+  .filters label { margin-top: 0; }
 </style>
 </head>
 <body>
@@ -87,11 +95,24 @@
         <label for="year">年度</label>
         <input id="year" inputmode="numeric">
       </div>
-      <div style="flex:3">
-        <label for="game">比賽</label>
-        <select id="game"></select>
+      <div>
+        <label for="category">分類</label>
+        <select id="category">
+          <option value="concert">演唱會</option>
+          <option value="anime">動漫</option>
+          <option value="collab">聯名</option>
+          <option value="other" selected>其他</option>
+        </select>
+      </div>
+      <div>
+        <label for="gameTeam">只列出此隊主場</label>
+        <select id="gameTeam"><option value="">全部球隊</option></select>
       </div>
     </div>
+
+    <label for="game">比賽（可複選，一檔主題日常橫跨連續數場）</label>
+    <select id="game" multiple></select>
+    <div class="hint">按住 ⌘ 或 Shift 可選多場。</div>
 
     <label for="title">主題日名稱</label>
     <input id="title" placeholder="例：涼水祭 — Bro's Water Park">
@@ -131,6 +152,26 @@
 
   <section>
     <h2>已建立的主題日</h2>
+    <div class="filters">
+      <div>
+        <label for="filterTeam">球隊</label>
+        <select id="filterTeam"><option value="">全部球隊</option></select>
+      </div>
+      <div>
+        <label for="filterCategory">分類</label>
+        <select id="filterCategory">
+          <option value="">全部分類</option>
+          <option value="concert">演唱會</option>
+          <option value="anime">動漫</option>
+          <option value="collab">聯名</option>
+          <option value="other">其他</option>
+        </select>
+      </div>
+      <div>
+        <label for="filterText">關鍵字</label>
+        <input id="filterText" placeholder="主題日名稱">
+      </div>
+    </div>
     <table>
       <thead><tr><th>日期</th><th>場次</th><th>名稱</th><th></th></tr></thead>
       <tbody id="themeRows"></tbody>
@@ -208,6 +249,7 @@ async function enter() {
   show($("app"), true);
   show($("signOut"), true);
   $("year").value = String(new Date().getFullYear());
+  fillTeamSelects();
   await loadGames();
   await loadThemes();
 }
@@ -220,15 +262,37 @@ async function loadGames() {
   } catch (e) {
     return say($("saveMsg"), "讀取比賽失敗：" + e.message, false);
   }
+  renderGameOptions();
+}
+
+/// 一整季近四百場，全部列出來很難挑，因此可先用主場球隊縮小範圍。
+function renderGameOptions() {
   const select = $("game");
+  const wanted = $("gameTeam").value;
+  const kept = new Set([...select.selectedOptions].map((o) => o.value));
   select.innerHTML = "";
   for (const g of games) {
+    if (wanted && g.home_code !== wanted) continue;
     const option = document.createElement("option");
     option.value = g.kind_code + "/" + g.game_sno;
     option.textContent = g.game_date + "  #" + g.game_sno + "  " +
       teamName(g.visiting_code) + " @ " + teamName(g.home_code) + "  " + (g.field || "");
+    if (kept.has(option.value)) option.selected = true;
     select.appendChild(option);
   }
+}
+
+$("gameTeam").onchange = renderGameOptions;
+
+/// 選取指定的場次，並把第一場捲進視野。
+function selectGames(values) {
+  const select = $("game");
+  let first = null;
+  for (const option of select.options) {
+    option.selected = values.includes(option.value);
+    if (option.selected && !first) first = option;
+  }
+  if (first) first.scrollIntoView({ block: "nearest" });
 }
 
 const TEAMS = {
@@ -237,9 +301,26 @@ const TEAMS = {
 };
 const teamName = (code) => TEAMS[code] || code;
 
+const CATEGORIES = { concert: "演唱會", anime: "動漫", collab: "聯名", other: "其他" };
+
+function fillTeamSelects() {
+  for (const id of ["gameTeam", "filterTeam"]) {
+    const select = $(id);
+    if (select.options.length > 1) continue;
+    for (const [code, name] of Object.entries(TEAMS)) {
+      const option = document.createElement("option");
+      option.value = code;
+      option.textContent = name;
+      select.appendChild(option);
+    }
+  }
+}
+
 $("year").onchange = async () => { await loadGames(); await loadThemes(); };
 
 // ---------------------------------------------------------------- 主題日
+
+let themeRuns = [];
 
 async function loadThemes() {
   let rows = [];
@@ -248,59 +329,131 @@ async function loadThemes() {
   } catch (e) {
     return say($("saveMsg"), "讀取主題日失敗：" + e.message, false);
   }
+  themeRuns = groupRuns(rows);
+  renderThemes();
+}
+
+/// 同一檔主題日常橫跨連續數場，合併成一段再列出，
+/// 編輯與刪除也就一次處理整段，不必逐場重複操作。
+function groupRuns(rows) {
+  const withGame = rows.map((t) => ({
+    ...t,
+    game: games.find((g) => g.kind_code === t.kind_code && g.game_sno === t.game_sno),
+  }));
+  withGame.sort((a, b) => (a.game?.game_date ?? "").localeCompare(b.game?.game_date ?? ""));
+
+  const runs = [];
+  for (const t of withGame) {
+    const last = runs[runs.length - 1];
+    if (last && last.title === t.title && last.homeCode === t.game?.home_code) {
+      last.items.push(t);
+    } else {
+      runs.push({ title: t.title, homeCode: t.game?.home_code, items: [t] });
+    }
+  }
+  return runs;
+}
+
+function renderThemes() {
+  const team = $("filterTeam").value;
+  const category = $("filterCategory").value;
+  const keyword = $("filterText").value.trim().toLowerCase();
+
+  const shown = themeRuns.filter((run) => {
+    if (team && run.homeCode !== team) return false;
+    if (category && (run.items[0].category || "other") !== category) return false;
+    if (keyword && !run.title.toLowerCase().includes(keyword)) return false;
+    return true;
+  });
+
   const body = $("themeRows");
   body.innerHTML = "";
-  show($("noThemes"), rows.length === 0);
+  show($("noThemes"), shown.length === 0);
+  $("noThemes").textContent = themeRuns.length === 0
+    ? "尚未建立任何主題日。"
+    : "沒有符合篩選條件的主題日。";
 
-  for (const t of rows) {
-    const game = games.find((g) => g.kind_code === t.kind_code && g.game_sno === t.game_sno);
+  for (const run of shown) {
+    const first = run.items[0];
+    const last = run.items[run.items.length - 1];
     const tr = document.createElement("tr");
 
-    const add = (text) => {
+    const add = (build) => {
       const td = document.createElement("td");
-      td.textContent = text;
+      build(td);
       tr.appendChild(td);
-      return td;
-    };
-    add(game ? game.game_date : "—");
-    add("#" + t.game_sno);
-    add(t.title);
-
-    const tools = document.createElement("td");
-    const wrap = document.createElement("div");
-    wrap.className = "mini";
-
-    const edit = document.createElement("button");
-    edit.className = "ghost";
-    edit.textContent = "編輯";
-    edit.onclick = () => fill(t);
-
-    const remove = document.createElement("button");
-    remove.className = "danger";
-    remove.textContent = "刪除";
-    remove.onclick = async () => {
-      if (!confirm("確定刪除「" + t.title + "」？")) return;
-      await call("/themes?year=" + t.year + "&kindCode=" + t.kind_code +
-                 "&gameSno=" + t.game_sno, { method: "DELETE" });
-      await loadThemes();
     };
 
-    wrap.appendChild(edit);
-    wrap.appendChild(remove);
-    tools.appendChild(wrap);
-    tr.appendChild(tools);
+    add((td) => {
+      const from = first.game?.game_date ?? "—";
+      const to = last.game?.game_date;
+      td.textContent = run.items.length > 1 && to && to !== from ? from + " ~ " + to : from;
+    });
+    add((td) => {
+      td.textContent = run.items.map((t) => "#" + t.game_sno).join(" ");
+    });
+    add((td) => {
+      td.append(run.title);
+      const tag = document.createElement("span");
+      tag.className = "tag";
+      tag.textContent = CATEGORIES[first.category] || "其他";
+      td.appendChild(tag);
+      if (run.homeCode) {
+        const home = document.createElement("span");
+        home.className = "tag";
+        home.textContent = teamName(run.homeCode);
+        td.appendChild(home);
+      }
+    });
+
+    add((td) => {
+      const wrap = document.createElement("div");
+      wrap.className = "mini";
+
+      const edit = document.createElement("button");
+      edit.className = "ghost";
+      edit.textContent = "編輯";
+      edit.onclick = () => fill(run);
+
+      const remove = document.createElement("button");
+      remove.className = "danger";
+      remove.textContent = "刪除";
+      remove.onclick = async () => {
+        const count = run.items.length;
+        if (!confirm("確定刪除「" + run.title + "」" +
+                     (count > 1 ? "（共 " + count + " 場）" : "") + "？")) return;
+        const snos = run.items.map((t) => t.game_sno).join(",");
+        await call("/themes?year=" + first.year + "&kindCode=" + first.kind_code +
+                   "&gameSnos=" + snos, { method: "DELETE" });
+        await loadThemes();
+      };
+
+      wrap.appendChild(edit);
+      wrap.appendChild(remove);
+      td.appendChild(wrap);
+    });
+
     body.appendChild(tr);
   }
 }
 
-function fill(t) {
-  $("game").value = t.kind_code + "/" + t.game_sno;
-  $("title").value = t.title || "";
-  $("subtitle").value = t.subtitle || "";
-  $("bodyText").value = t.body || "";
-  $("imageUrl").value = t.image_url || "";
-  $("ticketUrl").value = t.ticket_url || "";
-  $("accent").value = t.accent || "";
+for (const id of ["filterTeam", "filterCategory"]) $(id).onchange = renderThemes;
+$("filterText").oninput = renderThemes;
+
+function fill(run) {
+  const first = run.items[0];
+  // 先把清單縮到該球隊主場，選取整段才不會被其他球隊的場次淹沒
+  $("gameTeam").value = run.homeCode || "";
+  renderGameOptions();
+  selectGames(run.items.map((t) => t.kind_code + "/" + t.game_sno));
+
+  $("category").value = first.category || "other";
+  $("title").value = first.title || "";
+  $("subtitle").value = first.subtitle || "";
+  $("bodyText").value = first.body || "";
+  $("imageUrl").value = first.image_url || "";
+  $("ticketUrl").value = first.ticket_url || "";
+  $("accent").value = first.accent || "";
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -309,13 +462,18 @@ $("reset").onclick = () => {
     $(id).value = "";
   }
   $("notify").checked = false;
+  $("category").value = "other";
+  selectGames([]);
   say($("saveMsg"), "", true);
 };
 
 $("save").onclick = async () => {
-  const picked = $("game").value.split("/");
-  if (!picked[1]) return say($("saveMsg"), "請先選擇比賽", false);
+  const picked = [...$("game").selectedOptions].map((o) => o.value);
+  if (picked.length === 0) return say($("saveMsg"), "請至少選擇一場比賽", false);
   if (!$("title").value.trim()) return say($("saveMsg"), "請填寫主題日名稱", false);
+
+  const kindCode = picked[0].split("/")[0];
+  const gameSnos = picked.map((v) => Number(v.split("/")[1]));
 
   $("save").disabled = true;
   try {
@@ -323,8 +481,9 @@ $("save").onclick = async () => {
       method: "POST",
       body: JSON.stringify({
         year: $("year").value,
-        kindCode: picked[0],
-        gameSno: Number(picked[1]),
+        kindCode,
+        gameSnos,
+        category: $("category").value,
         title: $("title").value,
         subtitle: $("subtitle").value,
         body: $("bodyText").value,
@@ -334,7 +493,7 @@ $("save").onclick = async () => {
         notify: $("notify").checked,
       }),
     });
-    let text = "已儲存";
+    let text = "已儲存 " + (result.saved ?? picked.length) + " 場";
     if (result.push && typeof result.push.sent === "number") {
       text += "，推播送出 " + result.push.sent + " 台裝置";
       if (result.push.failed) text += "（失敗 " + result.push.failed + "）";
@@ -385,13 +544,19 @@ $("loadSug").onclick = async () => {
     use.className = "ghost";
     use.textContent = "帶入表單";
     use.onclick = () => {
-      const match = games.find((g) =>
+      // 一檔主題日通常橫跨連續數場，整段一起帶入
+      const matches = games.filter((g) =>
         g.home_code === s.homeCode && s.dates.indexOf(g.game_date) >= 0
       );
-      if (!match) return say($("sugMsg"), "找不到「" + s.title + "」對應的比賽", false);
-      $("game").value = match.kind_code + "/" + match.game_sno;
+      if (matches.length === 0) {
+        return say($("sugMsg"), "找不到「" + s.title + "」對應的比賽", false);
+      }
+      $("gameTeam").value = s.homeCode;
+      renderGameOptions();
+      selectGames(matches.map((g) => g.kind_code + "/" + g.game_sno));
       $("title").value = s.title;
       $("subtitle").value = "";
+      say($("sugMsg"), "已帶入 " + matches.length + " 場，請確認分類後儲存", true);
       window.scrollTo({ top: 0, behavior: "smooth" });
     };
 
