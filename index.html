@@ -180,6 +180,36 @@
   </section>
 
   <section>
+    <h2>聊天室</h2>
+    <p class="note">只列出目前開放中的場次。開賽前兩小時開放、賽後一小時關閉。</p>
+    <div class="actions"><button class="ghost" id="loadRooms">重新整理</button></div>
+    <div id="roomList"></div>
+
+    <div id="roomDetail" class="hide">
+      <h2 style="margin-top:22px" id="roomTitle"></h2>
+      <table>
+        <thead><tr><th>時間</th><th>發言者</th><th>內容</th><th></th></tr></thead>
+        <tbody id="messageRows"></tbody>
+      </table>
+      <p class="note hide" id="noMessages">這間聊天室還沒有留言。</p>
+    </div>
+    <div id="roomMsg"></div>
+  </section>
+
+  <section>
+    <h2>封禁中的使用者</h2>
+    <p class="note">系統依違規階梯自動封禁：五分鐘、十分鐘、整場禁言；
+      場次禁言連續三場則永久。這裡可以提前解除。</p>
+    <div class="actions"><button class="ghost" id="loadBans">重新整理</button></div>
+    <table>
+      <thead><tr><th>使用者</th><th>來源</th><th>原因</th><th>到期</th><th></th></tr></thead>
+      <tbody id="banRows"></tbody>
+    </table>
+    <p class="note hide" id="noBans">目前沒有封禁中的使用者。</p>
+    <div id="banMsg"></div>
+  </section>
+
+  <section>
     <h2>從球團官網匯入建議</h2>
     <p class="note">
       只有統一獅與中信兄弟的公告格式可解析，其餘球團請手動建立。
@@ -252,6 +282,8 @@ async function enter() {
   fillTeamSelects();
   await loadGames();
   await loadThemes();
+  await loadRooms();
+  await loadBans();
 }
 
 // ---------------------------------------------------------------- 比賽
@@ -516,6 +548,205 @@ $("save").onclick = async () => {
     $("save").disabled = false;
   }
 };
+
+// ---------------------------------------------------------------- 聊天室
+
+let currentRoom = null;
+
+$("loadRooms").onclick = loadRooms;
+
+async function loadRooms() {
+  say($("roomMsg"), "", true);
+  let rooms;
+  try {
+    rooms = await call("/rooms");
+  } catch (e) {
+    return say($("roomMsg"), "讀取失敗：" + e.message, false);
+  }
+  const list = $("roomList");
+  list.innerHTML = "";
+  if (rooms.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "note";
+    empty.textContent = "目前沒有開放中的聊天室。";
+    list.appendChild(empty);
+    show($("roomDetail"), false);
+    return;
+  }
+  for (const room of rooms) {
+    const box = document.createElement("div");
+    box.className = "sug";
+
+    const text = document.createElement("div");
+    text.style.flex = "1";
+    const name = document.createElement("div");
+    name.textContent = teamName(room.visiting_code) + " @ " + teamName(room.home_code);
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = "#" + room.game_sno + " · " + (room.field || "") +
+      " · 留言 " + room.messages + " 則 · 關閉於 " +
+      new Date(room.closes_at).toLocaleString("zh-TW");
+    text.appendChild(name);
+    text.appendChild(meta);
+
+    const open = document.createElement("button");
+    open.className = "ghost";
+    open.textContent = "查看留言";
+    open.onclick = () => openRoom(room);
+
+    box.appendChild(text);
+    box.appendChild(open);
+    list.appendChild(box);
+  }
+}
+
+async function openRoom(room) {
+  currentRoom = room;
+  $("roomTitle").textContent =
+    teamName(room.visiting_code) + " @ " + teamName(room.home_code) + " 的留言";
+  show($("roomDetail"), true);
+  await loadMessages();
+}
+
+async function loadMessages() {
+  if (!currentRoom) return;
+  const q = "year=" + currentRoom.year + "&kindCode=" + currentRoom.kind_code +
+            "&gameSno=" + currentRoom.game_sno;
+  let rows;
+  try {
+    rows = await call("/messages?" + q);
+  } catch (e) {
+    return say($("roomMsg"), "讀取留言失敗：" + e.message, false);
+  }
+
+  const body = $("messageRows");
+  body.innerHTML = "";
+  show($("noMessages"), rows.length === 0);
+
+  for (const m of rows) {
+    const tr = document.createElement("tr");
+    if (m.hidden) tr.style.opacity = "0.45";
+
+    const add = (build) => {
+      const td = document.createElement("td");
+      build(td);
+      tr.appendChild(td);
+    };
+
+    add((td) => { td.textContent = new Date(m.created_at).toLocaleTimeString("zh-TW"); });
+    add((td) => { td.textContent = m.nickname; });
+    add((td) => {
+      if (m.title) {
+        const title = document.createElement("div");
+        title.style.fontWeight = "600";
+        title.textContent = m.title;
+        td.appendChild(title);
+      }
+      td.append(m.body);
+      if (m.parent_id) {
+        const tag = document.createElement("span");
+        tag.className = "tag";
+        tag.textContent = "回覆";
+        td.appendChild(tag);
+      }
+      if (m.hidden) {
+        const tag = document.createElement("span");
+        tag.className = "tag";
+        tag.textContent = "已下架";
+        td.appendChild(tag);
+      }
+    });
+
+    add((td) => {
+      const wrap = document.createElement("div");
+      wrap.className = "mini";
+
+      if (!m.hidden) {
+        const hide = document.createElement("button");
+        hide.className = "ghost";
+        hide.textContent = "下架";
+        hide.onclick = async () => {
+          if (!confirm("下架這則留言？")) return;
+          await call("/messages?id=" + m.id, { method: "DELETE" });
+          await loadMessages();
+        };
+        wrap.appendChild(hide);
+      }
+
+      for (const [label, minutes] of [["5 分", 5], ["10 分", 10], ["永久", 0]]) {
+        const ban = document.createElement("button");
+        ban.className = minutes === 0 ? "danger" : "ghost";
+        ban.textContent = label;
+        ban.onclick = async () => {
+          const scope = minutes === 0 ? "永久封禁" : ("封禁 " + label + "鐘");
+          if (!confirm(m.nickname + "：" + scope + "？")) return;
+          await call("/bans", {
+            method: "POST",
+            body: JSON.stringify({
+              userId: m.user_id,
+              minutes,
+              reason: "管理者封禁（" + m.nickname + "）",
+              // 有時效的只限這一場，永久則全域
+              year: minutes === 0 ? null : currentRoom.year,
+              kindCode: minutes === 0 ? null : currentRoom.kind_code,
+              gameSno: minutes === 0 ? null : currentRoom.game_sno,
+            }),
+          });
+          say($("roomMsg"), m.nickname + " 已" + scope, true);
+          await loadBans();
+        };
+        wrap.appendChild(ban);
+      }
+
+      td.appendChild(wrap);
+    });
+
+    body.appendChild(tr);
+  }
+}
+
+// ---------------------------------------------------------------- 封禁
+
+$("loadBans").onclick = loadBans;
+
+async function loadBans() {
+  say($("banMsg"), "", true);
+  let rows;
+  try {
+    rows = await call("/bans");
+  } catch (e) {
+    return say($("banMsg"), "讀取失敗：" + e.message, false);
+  }
+  const body = $("banRows");
+  body.innerHTML = "";
+  show($("noBans"), rows.length === 0);
+
+  for (const b of rows) {
+    const tr = document.createElement("tr");
+    const add = (text) => {
+      const td = document.createElement("td");
+      td.textContent = text;
+      tr.appendChild(td);
+    };
+    add(b.user_id.slice(0, 8) + "…");
+    add(b.source === "auto" ? "系統" : "管理者");
+    add(b.reason || "");
+    add(b.until ? new Date(b.until).toLocaleString("zh-TW") : "永久");
+
+    const tools = document.createElement("td");
+    const lift = document.createElement("button");
+    lift.className = "ghost";
+    lift.textContent = "解封";
+    lift.onclick = async () => {
+      if (!confirm("解除這筆封禁？")) return;
+      await call("/bans?id=" + b.id, { method: "DELETE" });
+      await loadBans();
+    };
+    tools.appendChild(lift);
+    tr.appendChild(tools);
+    body.appendChild(tr);
+  }
+}
 
 // ---------------------------------------------------------------- 匯入建議
 
