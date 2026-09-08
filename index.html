@@ -197,6 +197,18 @@
   </section>
 
   <section>
+    <h2>待處理的檢舉</h2>
+    <p class="note">累積三次檢舉會先自動隱藏，等這裡複核。判定沒問題可以放回去。</p>
+    <div class="actions"><button class="ghost" id="loadReports">重新整理</button></div>
+    <table>
+      <thead><tr><th>發言者</th><th>內容</th><th>理由</th><th></th></tr></thead>
+      <tbody id="reportRows"></tbody>
+    </table>
+    <p class="note hide" id="noReports">目前沒有待處理的檢舉。</p>
+    <div id="reportMsg"></div>
+  </section>
+
+  <section>
     <h2>封禁中的使用者</h2>
     <p class="note">系統依違規階梯自動封禁：五分鐘、十分鐘、整場禁言；
       場次禁言連續三場則永久。這裡可以提前解除。</p>
@@ -283,6 +295,7 @@ async function enter() {
   await loadGames();
   await loadThemes();
   await loadRooms();
+  await loadReports();
   await loadBans();
 }
 
@@ -698,6 +711,104 @@ async function loadMessages() {
         wrap.appendChild(ban);
       }
 
+      td.appendChild(wrap);
+    });
+
+    body.appendChild(tr);
+  }
+}
+
+// ---------------------------------------------------------------- 檢舉
+
+$("loadReports").onclick = loadReports;
+
+async function loadReports() {
+  say($("reportMsg"), "", true);
+  let rows;
+  try {
+    rows = await call("/reports");
+  } catch (e) {
+    return say($("reportMsg"), "讀取失敗：" + e.message, false);
+  }
+  const body = $("reportRows");
+  body.innerHTML = "";
+  show($("noReports"), rows.length === 0);
+
+  for (const item of rows) {
+    const m = item.message;
+    const tr = document.createElement("tr");
+    if (m.hidden) tr.style.opacity = "0.55";
+
+    const add = (build) => {
+      const td = document.createElement("td");
+      build(td);
+      tr.appendChild(td);
+    };
+
+    add((td) => { td.textContent = m.nickname; });
+    add((td) => {
+      if (m.title) {
+        const title = document.createElement("div");
+        title.style.fontWeight = "600";
+        title.textContent = m.title;
+        td.appendChild(title);
+      }
+      td.append(m.body);
+      if (m.hidden) {
+        const tag = document.createElement("span");
+        tag.className = "tag";
+        tag.textContent = "已自動隱藏";
+        td.appendChild(tag);
+      }
+    });
+    add((td) => {
+      td.textContent = item.reasons.join("、") + "（" + item.reasons.length + " 次）";
+    });
+
+    add((td) => {
+      const wrap = document.createElement("div");
+      wrap.className = "mini";
+
+      const keep = document.createElement("button");
+      keep.className = "ghost";
+      keep.textContent = "沒問題";
+      keep.onclick = async () => {
+        await call("/reports?messageId=" + m.id + "&restore=true", { method: "DELETE" });
+        say($("reportMsg"), "已復原並結案", true);
+        await loadReports();
+      };
+
+      const remove = document.createElement("button");
+      remove.className = "danger";
+      remove.textContent = "下架";
+      remove.onclick = async () => {
+        await call("/reports?messageId=" + m.id + "&hide=true", { method: "DELETE" });
+        say($("reportMsg"), "已下架並結案", true);
+        await loadReports();
+      };
+
+      const ban = document.createElement("button");
+      ban.className = "danger";
+      ban.textContent = "下架並封禁";
+      ban.onclick = async () => {
+        if (!confirm("下架這則並永久封禁 " + m.nickname + "？")) return;
+        await call("/reports?messageId=" + m.id + "&hide=true", { method: "DELETE" });
+        await call("/bans", {
+          method: "POST",
+          body: JSON.stringify({
+            userId: m.user_id,
+            minutes: 0,
+            reason: "檢舉成立（" + m.nickname + "）",
+          }),
+        });
+        say($("reportMsg"), "已下架並永久封禁", true);
+        await loadReports();
+        await loadBans();
+      };
+
+      wrap.appendChild(keep);
+      wrap.appendChild(remove);
+      wrap.appendChild(ban);
       td.appendChild(wrap);
     });
 
