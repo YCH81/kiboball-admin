@@ -222,6 +222,46 @@
   </section>
 
   <section>
+    <h2>贈送 Pro</h2>
+    <p class="note">給測試人員、活動得獎者，或自己。對方必須先在 App 用 Apple 登入過一次
+      才會有帳號；還沒登入過的話這裡查不到。天數留空或填 0 代表永久。
+      贈送的權益不會寫進訂閱表，也不影響 App Store 的對帳。</p>
+    <div class="row">
+      <label style="flex:2 1 240px">Email
+        <input id="grantEmail" type="email" placeholder="someone@example.com">
+      </label>
+      <label style="flex:0 1 110px">天數
+        <input id="grantDays" inputmode="numeric" placeholder="永久">
+      </label>
+      <label style="flex:1 1 180px">備註
+        <input id="grantNote" placeholder="例：TestFlight 測試">
+      </label>
+    </div>
+    <div class="actions">
+      <button id="addGrant">贈送</button>
+      <button class="ghost" id="loadGrants">重新整理</button>
+    </div>
+    <table>
+      <thead><tr><th>帳號</th><th>到期</th><th>備註</th><th></th></tr></thead>
+      <tbody id="grantRows"></tbody>
+    </table>
+    <p class="note hide" id="noGrants">目前沒有贈送中的權益。</p>
+    <div id="grantMsg"></div>
+  </section>
+
+  <section>
+    <h2>免費版額度</h2>
+    <p class="note">改完立刻生效，不需要重新部署，也不需要更新 App。
+      伺服器每次請求都重讀，所以已經開著 App 的使用者下一次動作就會套用。</p>
+    <div class="actions"><button class="ghost" id="loadSettings">重新整理</button></div>
+    <table>
+      <thead><tr><th>項目</th><th style="width:120px">數值</th><th>最後調整</th><th></th></tr></thead>
+      <tbody id="settingRows"></tbody>
+    </table>
+    <div id="settingMsg"></div>
+  </section>
+
+  <section>
     <h2>從球團官網匯入建議</h2>
     <p class="note">
       只有統一獅與中信兄弟的公告格式可解析，其餘球團請手動建立。
@@ -297,6 +337,8 @@ async function enter() {
   await loadRooms();
   await loadReports();
   await loadBans();
+  await loadGrants();
+  await loadSettings();
 }
 
 // ---------------------------------------------------------------- 比賽
@@ -855,6 +897,133 @@ async function loadBans() {
     };
     tools.appendChild(lift);
     tr.appendChild(tools);
+    body.appendChild(tr);
+  }
+}
+
+// ---------------------------------------------------------------- 贈送 Pro
+
+$("loadGrants").onclick = loadGrants;
+
+$("addGrant").onclick = async () => {
+  const email = $("grantEmail").value.trim();
+  if (!email) return say($("grantMsg"), "請填 email", false);
+  const days = Number($("grantDays").value || 0);
+  try {
+    await call("/grants", {
+      method: "POST",
+      body: JSON.stringify({ email, days, note: $("grantNote").value.trim() }),
+    });
+  } catch (e) {
+    return say($("grantMsg"), "贈送失敗：" + e.message, false);
+  }
+  $("grantEmail").value = "";
+  $("grantDays").value = "";
+  $("grantNote").value = "";
+  say($("grantMsg"), "已贈送。對方重開 App 後生效。", true);
+  await loadGrants();
+};
+
+async function loadGrants() {
+  say($("grantMsg"), "", true);
+  let rows;
+  try {
+    rows = await call("/grants");
+  } catch (e) {
+    return say($("grantMsg"), "讀取失敗：" + e.message, false);
+  }
+  const body = $("grantRows");
+  body.innerHTML = "";
+  show($("noGrants"), rows.length === 0);
+
+  for (const g of rows) {
+    const tr = document.createElement("tr");
+    const add = (text) => {
+      const td = document.createElement("td");
+      td.textContent = text;
+      tr.appendChild(td);
+    };
+    add(g.email || g.user_id.slice(0, 8) + "…");
+    add(g.until ? new Date(g.until).toLocaleString("zh-TW") : "永久");
+    add(g.note || "");
+
+    const tools = document.createElement("td");
+    const drop = document.createElement("button");
+    drop.className = "ghost";
+    drop.textContent = "收回";
+    drop.onclick = async () => {
+      if (!confirm("收回這個帳號的 Pro？")) return;
+      await call("/grants?userId=" + encodeURIComponent(g.user_id), { method: "DELETE" });
+      await loadGrants();
+    };
+    tools.appendChild(drop);
+    tr.appendChild(tools);
+    body.appendChild(tr);
+  }
+}
+
+// ---------------------------------------------------------------- 免費版額度
+
+$("loadSettings").onclick = loadSettings;
+
+async function loadSettings() {
+  say($("settingMsg"), "", true);
+  let payload;
+  try {
+    payload = await call("/settings");
+  } catch (e) {
+    return say($("settingMsg"), "讀取失敗：" + e.message, false);
+  }
+
+  const body = $("settingRows");
+  body.innerHTML = "";
+  for (const item of payload.settings) {
+    const tr = document.createElement("tr");
+
+    const label = document.createElement("td");
+    label.textContent = item.label;
+    tr.appendChild(label);
+
+    const valueCell = document.createElement("td");
+    const input = document.createElement("input");
+    input.type = "number";
+    input.min = "0";
+    input.step = "1";
+    input.value = String(item.value);
+    valueCell.appendChild(input);
+    tr.appendChild(valueCell);
+
+    const when = document.createElement("td");
+    when.textContent = item.updated_at
+      ? new Date(item.updated_at).toLocaleString("zh-TW")
+      : "";
+    tr.appendChild(when);
+
+    const tools = document.createElement("td");
+    const save = document.createElement("button");
+    save.textContent = "儲存";
+    save.onclick = async () => {
+      const next = Number(input.value);
+      if (!Number.isInteger(next) || next < 0) {
+        return say($("settingMsg"), "數值必須是 0 以上的整數", false);
+      }
+      save.disabled = true;
+      try {
+        await call("/settings", {
+          method: "POST",
+          body: JSON.stringify({ key: item.key, value: next }),
+        });
+        say($("settingMsg"), item.label + " 已改為 " + next, true);
+        await loadSettings();
+      } catch (e) {
+        say($("settingMsg"), "儲存失敗：" + e.message, false);
+      } finally {
+        save.disabled = false;
+      }
+    };
+    tools.appendChild(save);
+    tr.appendChild(tools);
+
     body.appendChild(tr);
   }
 }
