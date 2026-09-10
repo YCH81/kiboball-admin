@@ -197,9 +197,15 @@
   <section>
     <h2>從球團官網匯入建議</h2>
     <p class="note">
-      只有統一獅與中信兄弟的公告格式可解析，其餘球團請手動建立。
-      建議不會自動寫入，請確認後再套用。
+      球團一改版或換一篇公告，網址就變了，所以在這裡改，不必動程式碼。
+      沒有解析器的球團也列在下面，那是給你點進去看的入口。
+      建議不會自動寫入，請確認後再套用；已經建立過的不會再出現。
     </p>
+    <table>
+      <thead><tr><th style="width:110px">球團</th><th>公告網址</th><th style="width:70px"></th></tr></thead>
+      <tbody id="sourceRows"></tbody>
+    </table>
+    <div id="sourceMsg"></div>
     <div class="actions"><button class="ghost" id="loadSug">讀取建議</button></div>
     <div id="sugList"></div>
     <div id="sugMsg"></div>
@@ -361,7 +367,7 @@ async function enter() {
 ///
 /// 原本一登入就把七張表全撈一遍，多數時候只是要改一個主題日。
 const loaders = {
-  themes:    async () => { await loadGames(); await loadThemes(); },
+  themes:    async () => { await loadGames(); await loadThemes(); await loadSources(); },
   community: async () => { await loadRooms(); await loadReports(); await loadBans(); },
   members:   async () => { await loadGrants(); await loadSettings(); },
 };
@@ -1070,6 +1076,69 @@ async function loadSettings() {
   }
 }
 
+// ---------------------------------------------------------------- 來源網址
+
+async function loadSources() {
+  say($("sourceMsg"), "", true);
+  let rows;
+  try {
+    rows = await call("/sources");
+  } catch (e) {
+    return say($("sourceMsg"), "讀取失敗：" + e.message, false);
+  }
+  const body = $("sourceRows");
+  body.innerHTML = "";
+
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+
+    const team = document.createElement("td");
+    team.textContent = teamName(row.home_code);
+    // 沒有解析器的球團要一眼看得出來，否則會以為讀不到是壞了
+    if (!row.parser) {
+      const tag = document.createElement("span");
+      tag.className = "tag";
+      tag.textContent = "人工";
+      team.appendChild(tag);
+    }
+    tr.appendChild(team);
+
+    const cell = document.createElement("td");
+    const input = document.createElement("input");
+    input.type = "url";
+    input.value = row.url || "";
+    input.placeholder = "https://...";
+    cell.appendChild(input);
+    if (row.note) {
+      const hint = document.createElement("div");
+      hint.className = "hint";
+      hint.textContent = row.note;
+      cell.appendChild(hint);
+    }
+    tr.appendChild(cell);
+
+    const tools = document.createElement("td");
+    const save = document.createElement("button");
+    save.className = "ghost";
+    save.textContent = "儲存";
+    save.onclick = async () => {
+      try {
+        await call("/sources", {
+          method: "POST",
+          body: JSON.stringify({ homeCode: row.home_code, url: input.value.trim() }),
+        });
+      } catch (e) {
+        return say($("sourceMsg"), "儲存失敗：" + e.message, false);
+      }
+      say($("sourceMsg"), teamName(row.home_code) + " 的網址已更新", true);
+    };
+    tools.appendChild(save);
+    tr.appendChild(tools);
+
+    body.appendChild(tr);
+  }
+}
+
 // ---------------------------------------------------------------- 匯入建議
 
 $("loadSug").onclick = async () => {
@@ -1083,6 +1152,12 @@ $("loadSug").onclick = async () => {
   }
   if (result.problems && result.problems.length) {
     say($("sugMsg"), "部分來源讀取失敗：" + result.problems.join("；"), false);
+  } else if (result.suggestions.length === 0) {
+    say($("sugMsg"), result.hidden
+      ? "這一年的建議都已經建立過了（" + result.hidden + " 檔）"
+      : "目前沒有可用的建議", true);
+  } else if (result.hidden) {
+    say($("sugMsg"), "另有 " + result.hidden + " 檔已經建立過，不再列出", true);
   }
   for (const s of result.suggestions) {
     const box = document.createElement("div");
