@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ki Bo Ball 主題日後台</title>
+<title>Ki Bo Ball 後台</title>
 <style>
   :root {
     --ink: #23201d; --muted: #6f6862; --faint: #a49c95;
@@ -63,12 +63,19 @@
              margin-bottom: 14px; }
   .filters > div { flex: 1; min-width: 140px; }
   .filters label { margin-top: 0; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 18px; flex-wrap: wrap; }
+  .tabs .tab { width: auto; padding: 9px 18px; background: transparent;
+               color: var(--muted); border: 1px solid transparent;
+               font-weight: 600; letter-spacing: .04em; }
+  .tabs .tab:hover { color: var(--ink); }
+  .tabs .tab.on { background: var(--surface); color: var(--ink);
+                  border-color: var(--line); }
 </style>
 </head>
 <body>
 
 <header>
-  <h1>Ki Bo Ball 主題日後台</h1>
+  <h1>Ki Bo Ball 後台</h1>
   <span class="who" id="who"></span>
   <button class="ghost hide" id="signOut" style="width:auto;padding:6px 14px;font-size:13px">登出</button>
 </header>
@@ -88,6 +95,14 @@
 
 <div id="app" class="hide">
 
+
+  <nav class="tabs">
+    <button class="tab on" data-pane="themes">主題日</button>
+    <button class="tab" data-pane="community">聊天室與檢舉</button>
+    <button class="tab" data-pane="members">會員與額度</button>
+  </nav>
+
+  <div class="pane" id="pane-themes">
   <section>
     <h2>建立 / 修改主題日</h2>
     <div class="row">
@@ -180,6 +195,19 @@
   </section>
 
   <section>
+    <h2>從球團官網匯入建議</h2>
+    <p class="note">
+      只有統一獅與中信兄弟的公告格式可解析，其餘球團請手動建立。
+      建議不會自動寫入，請確認後再套用。
+    </p>
+    <div class="actions"><button class="ghost" id="loadSug">讀取建議</button></div>
+    <div id="sugList"></div>
+    <div id="sugMsg"></div>
+  </section>
+  </div>
+
+  <div class="pane hide" id="pane-community">
+  <section>
     <h2>聊天室</h2>
     <p class="note">只列出目前開放中的場次。開賽前兩小時開放、賽後一小時關閉。</p>
     <div class="actions"><button class="ghost" id="loadRooms">重新整理</button></div>
@@ -220,7 +248,9 @@
     <p class="note hide" id="noBans">目前沒有封禁中的使用者。</p>
     <div id="banMsg"></div>
   </section>
+  </div>
 
+  <div class="pane hide" id="pane-members">
   <section>
     <h2>贈送 Pro</h2>
     <p class="note">給測試人員、活動得獎者，或自己。對方必須先在 App 用 Apple 登入過一次
@@ -260,17 +290,7 @@
     </table>
     <div id="settingMsg"></div>
   </section>
-
-  <section>
-    <h2>從球團官網匯入建議</h2>
-    <p class="note">
-      只有統一獅與中信兄弟的公告格式可解析，其餘球團請手動建立。
-      建議不會自動寫入，請確認後再套用。
-    </p>
-    <div class="actions"><button class="ghost" id="loadSug">讀取建議</button></div>
-    <div id="sugList"></div>
-    <div id="sugMsg"></div>
-  </section>
+  </div>
 
 </div>
 </main>
@@ -332,13 +352,35 @@ async function enter() {
   show($("signOut"), true);
   $("year").value = String(new Date().getFullYear());
   fillTeamSelects();
-  await loadGames();
-  await loadThemes();
-  await loadRooms();
-  await loadReports();
-  await loadBans();
-  await loadGrants();
-  await loadSettings();
+  await openPane("themes");
+}
+
+// ---------------------------------------------------------------- 分頁
+
+/// 每個分頁第一次打開時才去讀資料。
+///
+/// 原本一登入就把七張表全撈一遍，多數時候只是要改一個主題日。
+const loaders = {
+  themes:    async () => { await loadGames(); await loadThemes(); },
+  community: async () => { await loadRooms(); await loadReports(); await loadBans(); },
+  members:   async () => { await loadGrants(); await loadSettings(); },
+};
+const loaded = new Set();
+
+for (const tab of document.querySelectorAll(".tabs .tab")) {
+  tab.onclick = () => openPane(tab.dataset.pane);
+}
+
+async function openPane(name) {
+  for (const tab of document.querySelectorAll(".tabs .tab")) {
+    tab.classList.toggle("on", tab.dataset.pane === name);
+  }
+  for (const pane of document.querySelectorAll(".pane")) {
+    show(pane, pane.id === "pane-" + name);
+  }
+  if (loaded.has(name)) return;
+  loaded.add(name);
+  await loaders[name]();
 }
 
 // ---------------------------------------------------------------- 比賽
