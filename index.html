@@ -286,6 +286,18 @@
   </section>
 
   <section>
+    <h2>廣告總開關</h2>
+    <p class="note">關掉之後 App 裡的廣告版位全部消失，不論有沒有訂閱。
+      改完下一次請求就生效，不需要重新部署，也不需要更新 App——
+      萬一投放到不該出現的內容，等改版送審來不及。</p>
+    <div class="check">
+      <input type="checkbox" id="adsEnabled">
+      <label for="adsEnabled">顯示廣告</label>
+    </div>
+    <div id="adsMsg"></div>
+  </section>
+
+  <section>
     <h2>免費版額度</h2>
     <p class="note">改完立刻生效，不需要重新部署，也不需要更新 App。
       伺服器每次請求都重讀，所以已經開著 App 的使用者下一次動作就會套用。</p>
@@ -1023,9 +1035,28 @@ async function loadSettings() {
     return say($("settingMsg"), "讀取失敗：" + e.message, false);
   }
 
+  // 廣告總開關是 0/1，用數字輸入框呈現既難按也難懂，拉出來做成勾選
+  const ads = payload.settings.find((item) => item.key === "ads_enabled");
+  if (ads) {
+    $("adsEnabled").checked = ads.value !== 0;
+    $("adsEnabled").onchange = async (event) => {
+      const on = event.target.checked;
+      try {
+        await call("/settings", {
+          method: "POST",
+          body: JSON.stringify({ key: "ads_enabled", value: on ? 1 : 0 }),
+        });
+      } catch (e) {
+        event.target.checked = !on;   // 存不進去就把畫面改回來
+        return say($("adsMsg"), "儲存失敗：" + e.message, false);
+      }
+      say($("adsMsg"), on ? "廣告已開啟。" : "廣告已全部關閉。", true);
+    };
+  }
+
   const body = $("settingRows");
   body.innerHTML = "";
-  for (const item of payload.settings) {
+  for (const item of payload.settings.filter((i) => i.key !== "ads_enabled")) {
     const tr = document.createElement("tr");
 
     const label = document.createElement("td");
