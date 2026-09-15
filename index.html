@@ -1330,12 +1330,21 @@ function matchGames(s) {
   const byKind = new Map();
   for (const g of games) {
     if (g.home_code !== s.homeCode || s.dates.indexOf(g.game_date) < 0) continue;
+    // 原定日延賽的那一筆不算：主題日辦在那一天，補賽時不會再辦一次，
+    // 而且主題日是綁在場次上的，套上去會跑到補賽那天
+    if (g.game_result === "1") continue;
     const list = byKind.get(g.kind_code) || [];
     // 延賽會讓同一場次出現在兩個日期，只算一次
     if (!list.includes(g.game_sno)) list.push(g.game_sno);
     byKind.set(g.kind_code, list);
   }
   return byKind;
+}
+
+/// 對不到比賽時說明原因：整檔都延賽了，還是日期根本沒有比賽。
+function noMatchReason(s) {
+  const onDates = games.filter((g) => g.home_code === s.homeCode && s.dates.indexOf(g.game_date) >= 0);
+  return onDates.length ? "這幾天的比賽都延賽了" : "找不到對應的比賽";
 }
 
 function renderSuggestions(list) {
@@ -1399,7 +1408,7 @@ function renderSuggestions(list) {
     meta.className = "meta";
     meta.textContent = teamName(s.homeCode) + " 主場 · " +
       s.dates[0] + (s.dates.length > 1 ? " ~ " + s.dates[s.dates.length - 1] : "") +
-      " · " + s.source + " · " + (gameCount ? gameCount + " 場" : "找不到對應的比賽");
+      " · " + s.source + " · " + (gameCount ? gameCount + " 場" : noMatchReason(s));
     text.appendChild(name);
     text.appendChild(meta);
     // 點文字也能勾，列很窄時勾選框不好點
@@ -1423,7 +1432,7 @@ function renderSuggestions(list) {
     use.onclick = () => {
       // 一檔主題日通常橫跨連續數場，整段一起帶入
       const picked = games.filter((g) =>
-        g.home_code === s.homeCode && s.dates.indexOf(g.game_date) >= 0
+        g.home_code === s.homeCode && s.dates.indexOf(g.game_date) >= 0 && g.game_result !== "1"
       );
       if (picked.length === 0) {
         return say($("sugMsg"), "找不到「" + s.title + "」對應的比賽", false);
