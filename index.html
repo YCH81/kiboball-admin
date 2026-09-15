@@ -68,6 +68,25 @@
                color: var(--muted); border: 1px solid transparent;
                font-weight: 600; letter-spacing: .04em; }
   .tabs .tab:hover { color: var(--ink); }
+  .status { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 99px;
+            background: #eef1ee; color: var(--muted); white-space: nowrap; }
+  .status.scheduled { background: #fff4de; color: #8a5a00; }
+  .status.sent { background: #eaf3ec; color: var(--accent); }
+  .status.failed, .status.canceled { background: #fbeceb; color: var(--danger); }
+  .teamChecks { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; }
+  .teamChecks label { display: flex; align-items: center; gap: 5px; margin: 0;
+                      color: var(--ink); font-size: 14px; }
+  .teamChecks input { width: auto; }
+  .tpl { border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+  .tpl h3 { font-size: 14px; margin: 0; display: flex; align-items: center; gap: 10px; }
+  .tpl h3 .check { margin: 0 0 0 auto; }
+  .tpl textarea { min-height: 54px; }
+  .preview { margin-top: 8px; background: #f2f0ec; border-radius: 12px; padding: 10px 12px;
+             font-size: 13px; line-height: 1.45; }
+  .preview b { display: block; font-size: 13px; }
+  .vars { font-size: 12px; color: var(--muted); line-height: 1.9; }
+  .vars code { background: #f2f0ec; padding: 1px 6px; border-radius: 5px; margin-right: 4px;
+               cursor: pointer; }
   .tabs .tab.on { background: var(--surface); color: var(--ink);
                   border-color: var(--line); }
 </style>
@@ -99,6 +118,7 @@
   <nav class="tabs">
     <button class="tab on" data-pane="themes">主題日</button>
     <button class="tab" data-pane="community">聊天室與檢舉</button>
+    <button class="tab" data-pane="push">推播</button>
     <button class="tab" data-pane="members">會員與額度</button>
   </nav>
 
@@ -256,6 +276,103 @@
   </section>
   </div>
 
+
+  <div class="pane hide" id="pane-push">
+  <section>
+    <h2>發送推播</h2>
+    <p class="note">公告、活動、臨時消息。只會送到有開啟通知權限、而且沒有關掉對應開關的裝置。
+      推播一旦送出就收不回來，送出前請先用「送到我的手機」確認內容。</p>
+    <label for="pushTitle">標題</label>
+    <input id="pushTitle" maxlength="60" placeholder="例：今晚比賽因雨延賽">
+    <label for="pushBody">內文</label>
+    <textarea id="pushBody" maxlength="300" placeholder="例：味全 vs 統一 改至 9/16 18:35 補賽"></textarea>
+    <div class="preview" id="pushPreview"><b>標題</b>內文</div>
+
+    <div class="row">
+      <div>
+        <label for="pushCategory">類別（決定尊重使用者的哪一個開關）</label>
+        <select id="pushCategory">
+          <option value="announcement">公告與活動</option>
+          <option value="news">球隊新聞</option>
+          <option value="theme">主題日</option>
+        </select>
+      </div>
+      <div>
+        <label for="pushWhen">發送時間</label>
+        <select id="pushWhen">
+          <option value="now">馬上發送</option>
+          <option value="later">排程</option>
+        </select>
+      </div>
+      <div class="hide" id="pushAtBox">
+        <label for="pushAt">排程時間（你電腦的時區）</label>
+        <input id="pushAt" type="datetime-local">
+      </div>
+    </div>
+
+    <label>對象</label>
+    <div class="teamChecks" id="pushTeams">
+      <label><input type="checkbox" value="" id="pushAll" checked> 所有人</label>
+    </div>
+    <p class="hint" id="pushAudience">計算中…</p>
+
+    <div class="actions">
+      <button id="pushSend">發送</button>
+      <button class="ghost" id="pushTest">送到我的手機</button>
+    </div>
+    <div id="pushMsg"></div>
+  </section>
+
+  <section>
+    <h2>排程與發送紀錄</h2>
+    <p class="note">包含後台手動發送、主題日、新聞自動推播。排程中的可以取消或提前送出。</p>
+    <div class="actions" style="margin-top:0;margin-bottom:10px">
+      <button class="ghost" id="loadCampaigns">重新整理</button>
+    </div>
+    <div style="overflow-x:auto">
+    <table>
+      <thead><tr><th>時間</th><th>來源</th><th>內容</th><th>對象</th><th>狀態</th><th></th></tr></thead>
+      <tbody id="campaignRows"></tbody>
+    </table>
+    </div>
+    <p class="note hide" id="noCampaigns">還沒有任何推播紀錄。</p>
+    <div id="campaignMsg"></div>
+  </section>
+
+  <section>
+    <h2>新聞自動推播</h2>
+    <p class="note">每 15 分鐘抓一次新聞，依標題判斷等級，推給相關球隊的球迷。
+      重大：交易、釋出、簽約、換帥、重傷、禁賽、封王。中度：傷兵、登錄註銷、先發異動、延賽、里程碑。
+      一般戰報不推。晚上 11 點到早上 8 點的新聞延到早上 8 點送。</p>
+    <div class="row">
+      <div>
+        <label for="newsLevel">推播等級</label>
+        <select id="newsLevel">
+          <option value="0">關閉</option>
+          <option value="1">只推重大新聞</option>
+          <option value="2">重大與中度新聞</option>
+        </select>
+      </div>
+      <div>
+        <label for="newsCap">每隊每天最多（則）</label>
+        <input id="newsCap" type="number" min="0" step="1">
+      </div>
+    </div>
+    <div class="actions"><button id="saveNews">儲存</button></div>
+    <div id="newsMsg"></div>
+  </section>
+
+  <section>
+    <h2>自動推播文案</h2>
+    <p class="note">比賽事件、主題日、新聞的標題與內文。改完儲存後，下一則就套用。
+      取消勾選「啟用」會停止發送這一類（比賽事件仍會記錄，動態島照常更新）。
+      點一下變數可以插入到游標位置。</p>
+    <div class="vars" id="tplVars"></div>
+    <div id="tplList" style="margin-top:12px"></div>
+    <div id="tplMsg"></div>
+  </section>
+  </div>
+
   <div class="pane hide" id="pane-members">
   <section>
     <h2>贈送 Pro</h2>
@@ -381,6 +498,8 @@ async function enter() {
 const loaders = {
   themes:    async () => { await loadGames(); await loadThemes(); await loadSources(); },
   community: async () => { await loadRooms(); await loadReports(); await loadBans(); },
+  push:      async () => { fillPushTeams(); await refreshAudience(); await loadCampaigns();
+                           await loadNewsSettings(); await loadTemplates(); },
   members:   async () => { await loadGrants(); await loadSettings(); },
 };
 const loaded = new Set();
@@ -1056,7 +1175,9 @@ async function loadSettings() {
 
   const body = $("settingRows");
   body.innerHTML = "";
-  for (const item of payload.settings.filter((i) => i.key !== "ads_enabled")) {
+  // 新聞推播的兩項放在「推播」分頁
+  const elsewhere = ["ads_enabled", "news_push_level", "news_push_daily_cap"];
+  for (const item of payload.settings.filter((i) => !elsewhere.includes(i.key))) {
     const tr = document.createElement("tr");
 
     const label = document.createElement("td");
@@ -1231,6 +1352,398 @@ $("loadSug").onclick = async () => {
     $("sugList").appendChild(box);
   }
 };
+
+
+// ---------------------------------------------------------------- 推播
+
+const SOURCES = { admin: "後台", news: "新聞", theme: "主題日" };
+const STATUS = { scheduled: "排程中", sending: "發送中", sent: "已送出", canceled: "已取消", failed: "失敗" };
+
+function fillPushTeams() {
+  const box = $("pushTeams");
+  if (box.children.length > 1) return;
+  for (const [code, name] of Object.entries(TEAMS)) {
+    const label = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = code;
+    input.className = "pushTeam";
+    label.appendChild(input);
+    label.appendChild(document.createTextNode(" " + name + "球迷"));
+    box.appendChild(label);
+  }
+  // 「所有人」與個別球隊互斥，免得勾了球隊卻因為所有人也勾著而送給全部
+  box.onchange = (event) => {
+    if (event.target.id === "pushAll") {
+      if (event.target.checked) for (const c of document.querySelectorAll(".pushTeam")) c.checked = false;
+    } else {
+      const any = [...document.querySelectorAll(".pushTeam")].some((c) => c.checked);
+      $("pushAll").checked = !any;
+    }
+    refreshAudience();
+  };
+}
+
+function pickedTeams() {
+  return [...document.querySelectorAll(".pushTeam")].filter((c) => c.checked).map((c) => c.value);
+}
+
+async function refreshAudience() {
+  const teams = pickedTeams();
+  try {
+    const r = await call("/audience?teams=" + teams.join(",") + "&category=" + $("pushCategory").value);
+    $("pushAudience").textContent = "會送到 " + r.devices + " 台裝置（目前共 " + r.total + " 台有開通知）";
+  } catch (e) {
+    $("pushAudience").textContent = "無法計算對象：" + e.message;
+  }
+}
+
+function renderPushPreview() {
+  const preview = $("pushPreview");
+  preview.innerHTML = "";
+  const b = document.createElement("b");
+  b.textContent = $("pushTitle").value || "標題";
+  preview.appendChild(b);
+  preview.appendChild(document.createTextNode($("pushBody").value || "內文"));
+}
+$("pushTitle").oninput = renderPushPreview;
+$("pushBody").oninput = renderPushPreview;
+$("pushCategory").onchange = refreshAudience;
+$("pushWhen").onchange = () => show($("pushAtBox"), $("pushWhen").value === "later");
+
+$("pushSend").onclick = async () => {
+  const title = $("pushTitle").value.trim();
+  const body = $("pushBody").value.trim();
+  if (!title || !body) return say($("pushMsg"), "標題與內文都要填", false);
+
+  let sendAt = null;
+  if ($("pushWhen").value === "later") {
+    if (!$("pushAt").value) return say($("pushMsg"), "請選排程時間", false);
+    const at = new Date($("pushAt").value);
+    if (at.getTime() <= Date.now()) return say($("pushMsg"), "排程時間已經過去了", false);
+    sendAt = at.toISOString();
+  }
+  const teams = pickedTeams();
+  const who = teams.length ? teams.map((c) => teamName(c) + "球迷").join("、") : "所有人";
+  const when = sendAt ? new Date(sendAt).toLocaleString("zh-TW") + " 發送" : "馬上發送";
+  if (!confirm("確定要送出嗎？\n\n對象：" + who + "\n時間：" + when + "\n\n" + title + "\n" + body)) return;
+
+  $("pushSend").disabled = true;
+  try {
+    const r = await call("/campaigns", {
+      method: "POST",
+      body: JSON.stringify({ title, body, teams, category: $("pushCategory").value, sendAt }),
+    });
+    if (r.result) {
+      say($("pushMsg"), "已送出：成功 " + r.result.sent + " 台、失敗 " + r.result.failed + " 台", true);
+    } else {
+      say($("pushMsg"), "已排程，將於 " + new Date(r.scheduledAt).toLocaleString("zh-TW") + " 發送", true);
+    }
+    $("pushTitle").value = "";
+    $("pushBody").value = "";
+    renderPushPreview();
+    await loadCampaigns();
+  } catch (e) {
+    say($("pushMsg"), "發送失敗：" + e.message, false);
+  } finally {
+    $("pushSend").disabled = false;
+  }
+};
+
+$("pushTest").onclick = () => testPush($("pushTitle").value, $("pushBody").value, $("pushMsg"));
+
+async function testPush(title, body, target) {
+  if (!body.trim()) return say(target, "內文不能空白", false);
+  try {
+    const r = await call("/test-push", { method: "POST", body: JSON.stringify({ title, body }) });
+    say(target, r.sent ? "已送到你的 " + r.sent + " 台裝置" : "送出失敗：" + r.failed.join("、"), r.sent > 0);
+  } catch (e) {
+    say(target, e.message, false);
+  }
+}
+
+$("loadCampaigns").onclick = loadCampaigns;
+
+async function loadCampaigns() {
+  let rows = [];
+  try {
+    rows = await call("/campaigns");
+  } catch (e) {
+    return say($("campaignMsg"), "讀取失敗：" + e.message, false);
+  }
+  const body = $("campaignRows");
+  body.innerHTML = "";
+  show($("noCampaigns"), rows.length === 0);
+
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    const cell = (text) => {
+      const td = document.createElement("td");
+      td.textContent = text;
+      tr.appendChild(td);
+      return td;
+    };
+
+    const when = row.status === "sent" && row.sent_at ? row.sent_at : row.scheduled_at;
+    cell(new Date(when).toLocaleString("zh-TW", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }));
+    const source = cell(SOURCES[row.source] || row.source);
+    if (row.meta && row.meta.level) {
+      const tag = document.createElement("span");
+      tag.className = "tag";
+      tag.textContent = row.meta.level === "major" ? "重大" : "中度";
+      source.appendChild(tag);
+    }
+
+    const content = document.createElement("td");
+    const strong = document.createElement("b");
+    strong.textContent = row.title;
+    content.appendChild(strong);
+    content.appendChild(document.createElement("br"));
+    content.appendChild(document.createTextNode(row.body));
+    if (row.meta && row.meta.url) {
+      content.appendChild(document.createElement("br"));
+      const link = document.createElement("a");
+      link.href = row.meta.url;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.textContent = "原文";
+      link.className = "note";
+      content.appendChild(link);
+    }
+    tr.appendChild(content);
+
+    cell(row.team_codes && row.team_codes.length
+      ? row.team_codes.map(teamName).join("、") : "所有人");
+
+    const status = document.createElement("td");
+    const badge = document.createElement("span");
+    badge.className = "status " + row.status;
+    badge.textContent = STATUS[row.status] || row.status;
+    status.appendChild(badge);
+    if (row.status === "sent") {
+      status.appendChild(document.createElement("br"));
+      status.appendChild(document.createTextNode(row.sent_count + " 台" + (row.failed_count ? "（失敗 " + row.failed_count + "）" : "")));
+    }
+    if (row.error) {
+      status.appendChild(document.createElement("br"));
+      status.appendChild(document.createTextNode(row.error));
+    }
+    tr.appendChild(status);
+
+    const tools = document.createElement("td");
+    if (row.status === "scheduled") {
+      const mini = document.createElement("div");
+      mini.className = "mini";
+      const now = document.createElement("button");
+      now.textContent = "現在送";
+      now.onclick = async () => {
+        if (!confirm("現在就送出「" + row.title + "」？")) return;
+        now.disabled = true;
+        try {
+          const r = await call("/campaign-send?id=" + row.id, { method: "POST" });
+          say($("campaignMsg"), "已送出：成功 " + r.result.sent + " 台", true);
+        } catch (e) {
+          say($("campaignMsg"), e.message, false);
+        }
+        await loadCampaigns();
+      };
+      const cancel = document.createElement("button");
+      cancel.className = "danger";
+      cancel.textContent = "取消";
+      cancel.onclick = async () => {
+        if (!confirm("取消「" + row.title + "」？")) return;
+        try {
+          await call("/campaigns?id=" + row.id, { method: "DELETE" });
+          say($("campaignMsg"), "已取消", true);
+        } catch (e) {
+          say($("campaignMsg"), e.message, false);
+        }
+        await loadCampaigns();
+      };
+      mini.appendChild(now);
+      mini.appendChild(cancel);
+      tools.appendChild(mini);
+    }
+    tr.appendChild(tools);
+    body.appendChild(tr);
+  }
+}
+
+async function loadNewsSettings() {
+  try {
+    const payload = await call("/settings");
+    const get = (key) => payload.settings.find((i) => i.key === key);
+    const level = get("news_push_level");
+    const cap = get("news_push_daily_cap");
+    if (!level || !cap) return say($("newsMsg"), "資料庫還沒有新聞推播設定，請先執行資料庫更新", false);
+    $("newsLevel").value = String(level.value);
+    $("newsCap").value = String(cap.value);
+  } catch (e) {
+    say($("newsMsg"), "讀取失敗：" + e.message, false);
+  }
+}
+
+$("saveNews").onclick = async () => {
+  const cap = Number($("newsCap").value);
+  if (!Number.isInteger(cap) || cap < 0) return say($("newsMsg"), "每天上限必須是 0 以上的整數", false);
+  try {
+    await call("/settings", { method: "POST", body: JSON.stringify({ key: "news_push_level", value: Number($("newsLevel").value) }) });
+    await call("/settings", { method: "POST", body: JSON.stringify({ key: "news_push_daily_cap", value: cap }) });
+    say($("newsMsg"), "已儲存", true);
+  } catch (e) {
+    say($("newsMsg"), "儲存失敗：" + e.message, false);
+  }
+};
+
+/// 預覽用的範例值：一場味全在客場打統一的比賽，從味全球迷的角度。
+const SAMPLE = {
+  team: "味全", opponent: "統一", visiting: "味全", home: "統一", vscore: 3, hscore: 2,
+  inning: 7, half: "▲", play: "劉基鴻 擊出左外野安打，二壘跑者回來得分",
+  result: "味全獲勝", date: "09/15", title: "味全龍完成交易 以即戰力投手換取年輕野手",
+};
+function renderSample(text) {
+  return text.replace(/\{(\w+)\}/g, (_, name) => SAMPLE[name] === undefined ? "" : String(SAMPLE[name]))
+    .replace(/[ 　]{2,}/g, " ").trim();
+}
+
+let lastFocused = null;
+
+async function loadTemplates() {
+  let payload;
+  try {
+    payload = await call("/templates");
+  } catch (e) {
+    return say($("tplMsg"), "讀取失敗：" + e.message, false);
+  }
+
+  const vars = $("tplVars");
+  vars.innerHTML = "";
+  for (const [name, meaning] of Object.entries(payload.variables)) {
+    const code = document.createElement("code");
+    code.textContent = "{" + name + "}";
+    code.title = meaning;
+    // 按下去之前焦點會離開輸入框，所以記住上一個聚焦的欄位
+    code.onmousedown = (event) => event.preventDefault();
+    code.onclick = () => {
+      const field = lastFocused;
+      if (!field) return;
+      const start = field.selectionStart, end = field.selectionEnd;
+      field.value = field.value.slice(0, start) + "{" + name + "}" + field.value.slice(end);
+      field.selectionStart = field.selectionEnd = start + name.length + 2;
+      field.dispatchEvent(new Event("input"));
+      field.focus();
+    };
+    vars.appendChild(code);
+    vars.appendChild(document.createTextNode(meaning + "　"));
+  }
+
+  const list = $("tplList");
+  list.innerHTML = "";
+  if (!payload.templates.length) {
+    return say($("tplMsg"), "資料庫還沒有推播文案，請先執行資料庫更新", false);
+  }
+  for (const tpl of payload.templates) {
+    const box = document.createElement("div");
+    box.className = "tpl";
+
+    const h3 = document.createElement("h3");
+    h3.appendChild(document.createTextNode(tpl.label));
+    const enabledWrap = document.createElement("div");
+    enabledWrap.className = "check";
+    const enabled = document.createElement("input");
+    enabled.type = "checkbox";
+    enabled.checked = tpl.enabled;
+    enabled.id = "tpl-enabled-" + tpl.kind;
+    const enabledLabel = document.createElement("label");
+    enabledLabel.htmlFor = enabled.id;
+    enabledLabel.textContent = "啟用";
+    enabledWrap.appendChild(enabled);
+    enabledWrap.appendChild(enabledLabel);
+    h3.appendChild(enabledWrap);
+    box.appendChild(h3);
+
+    const desc = document.createElement("p");
+    desc.className = "hint";
+    desc.textContent = tpl.description;
+    box.appendChild(desc);
+
+    const titleLabel = document.createElement("label");
+    titleLabel.textContent = "標題";
+    const title = document.createElement("input");
+    title.value = tpl.title;
+    title.maxLength = 60;
+    const bodyLabel = document.createElement("label");
+    bodyLabel.textContent = "內文";
+    const body = document.createElement("textarea");
+    body.value = tpl.body;
+    body.maxLength = 300;
+    box.appendChild(titleLabel);
+    box.appendChild(title);
+    box.appendChild(bodyLabel);
+    box.appendChild(body);
+
+    const preview = document.createElement("div");
+    preview.className = "preview";
+    const paint = () => {
+      preview.innerHTML = "";
+      const b = document.createElement("b");
+      b.textContent = renderSample(title.value);
+      preview.appendChild(b);
+      preview.appendChild(document.createTextNode(renderSample(body.value)));
+    };
+    paint();
+    title.oninput = paint;
+    body.oninput = paint;
+    title.onfocus = () => { lastFocused = title; };
+    body.onfocus = () => { lastFocused = body; };
+    box.appendChild(preview);
+
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    const save = document.createElement("button");
+    save.textContent = "儲存";
+    const reset = document.createElement("button");
+    reset.className = "ghost";
+    reset.textContent = "還原預設";
+    const test = document.createElement("button");
+    test.className = "ghost";
+    test.textContent = "用範例送到我的手機";
+    const msg = document.createElement("div");
+
+    save.onclick = async () => {
+      save.disabled = true;
+      try {
+        await call("/templates", {
+          method: "POST",
+          body: JSON.stringify({ kind: tpl.kind, title: title.value, body: body.value, enabled: enabled.checked }),
+        });
+        say(msg, "已儲存，下一則「" + tpl.label + "」推播會套用", true);
+      } catch (e) {
+        say(msg, "儲存失敗：" + e.message, false);
+      } finally {
+        save.disabled = false;
+      }
+    };
+    reset.onclick = () => {
+      const d = payload.defaults[tpl.kind];
+      if (!d) return;
+      title.value = d.title;
+      body.value = d.body;
+      paint();
+      say(msg, "已填回預設文案，按「儲存」才會生效", true);
+    };
+    test.onclick = () => testPush(renderSample(title.value), renderSample(body.value), msg);
+    // 勾選框改了也要按儲存。直接存的話，誤點一下整類推播就停了
+    enabled.onchange = () => say(msg, enabled.checked ? "按「儲存」後恢復發送" : "按「儲存」後停止發送這一類", true);
+
+    actions.appendChild(save);
+    actions.appendChild(reset);
+    actions.appendChild(test);
+    box.appendChild(actions);
+    box.appendChild(msg);
+    list.appendChild(box);
+  }
+}
 
 // ---------------------------------------------------------------- 啟動
 
