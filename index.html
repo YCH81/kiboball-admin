@@ -52,7 +52,8 @@
   .msg.err { background: #fbeceb; color: var(--danger); }
   .hide { display: none; }
   .sug { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
-         margin-bottom: 8px; display: flex; align-items: center; gap: 12px; }
+         margin-bottom: 8px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .sug > div { min-width: 200px; }
   .sug .meta { color: var(--muted); font-size: 12px; }
   .sug button { width: auto; padding: 5px 12px; font-size: 12px; }
   select[multiple] { height: 190px; padding: 6px; }
@@ -1311,9 +1312,84 @@ $("loadSug").onclick = async () => {
   } else if (result.hidden) {
     say($("sugMsg"), "另有 " + result.hidden + " 檔已經建立過，不再列出", true);
   }
-  for (const s of result.suggestions) {
+  renderSuggestions(result.suggestions);
+};
+
+/// 依標題猜分類。猜不到就是「其他」，新增前每一檔都還能改。
+function guessCategory(title) {
+  // 寫明「聯名」的優先：「航海王聯名」算聯名，不算動漫
+  if (/聯名|合作|攜手/.test(title)) return "collab";
+  if (/演唱會|音樂會|live|LIVE|開唱|獻唱|應援曲|歌手|樂團/.test(title)) return "concert";
+  if (/動漫|動畫|漫畫|卡通|寶可夢|三麗鷗|凱蒂貓|Hello Kitty|哆啦|蠟筆小新|航海王|鬼滅|咒術|初音/.test(title)) return "anime";
+  if (/×|\s[xX]\s/.test(title)) return "collab";
+  return "other";
+}
+
+/// 一檔建議對應到的比賽，依類別分組（例行賽、季後賽要分開建立）。
+function matchGames(s) {
+  const byKind = new Map();
+  for (const g of games) {
+    if (g.home_code !== s.homeCode || s.dates.indexOf(g.game_date) < 0) continue;
+    const list = byKind.get(g.kind_code) || [];
+    // 延賽會讓同一場次出現在兩個日期，只算一次
+    if (!list.includes(g.game_sno)) list.push(g.game_sno);
+    byKind.set(g.kind_code, list);
+  }
+  return byKind;
+}
+
+function renderSuggestions(list) {
+  const root = $("sugList");
+  root.innerHTML = "";
+  if (!list.length) return;
+
+  // ---- 工具列：全選、數量、批次新增
+  const bar = document.createElement("div");
+  bar.className = "sug";
+  bar.style.background = "#f7f5f2";
+  const allWrap = document.createElement("label");
+  allWrap.style.cssText = "display:flex;align-items:center;gap:6px;margin:0;color:var(--ink);font-size:14px;flex:1";
+  const all = document.createElement("input");
+  all.type = "checkbox";
+  all.style.width = "auto";
+  allWrap.appendChild(all);
+  const count = document.createElement("span");
+  allWrap.appendChild(count);
+  const addPicked = document.createElement("button");
+  addPicked.textContent = "新增勾選的主題日";
+  bar.appendChild(allWrap);
+  bar.appendChild(addPicked);
+  root.appendChild(bar);
+
+  const rows = [];
+
+  const refresh = () => {
+    const usable = rows.filter((r) => !r.check.disabled);
+    const picked = usable.filter((r) => r.check.checked);
+    count.textContent = "全選（已勾 " + picked.length + " / " + usable.length + " 檔）";
+    all.checked = usable.length > 0 && picked.length === usable.length;
+    all.indeterminate = picked.length > 0 && picked.length < usable.length;
+    addPicked.disabled = picked.length === 0;
+    addPicked.textContent = picked.length ? "新增勾選的 " + picked.length + " 檔" : "新增勾選的主題日";
+  };
+
+  all.onchange = () => {
+    for (const r of rows) if (!r.check.disabled) r.check.checked = all.checked;
+    refresh();
+  };
+
+  for (const s of list) {
     const box = document.createElement("div");
     box.className = "sug";
+
+    const matches = matchGames(s);
+    const gameCount = [...matches.values()].reduce((n, l) => n + l.length, 0);
+
+    const check = document.createElement("input");
+    check.type = "checkbox";
+    check.style.width = "auto";
+    check.disabled = gameCount === 0;
+    check.onchange = refresh;
 
     const text = document.createElement("div");
     text.style.flex = "1";
@@ -1323,36 +1399,102 @@ $("loadSug").onclick = async () => {
     meta.className = "meta";
     meta.textContent = teamName(s.homeCode) + " 主場 · " +
       s.dates[0] + (s.dates.length > 1 ? " ~ " + s.dates[s.dates.length - 1] : "") +
-      " · " + s.source;
+      " · " + s.source + " · " + (gameCount ? gameCount + " 場" : "找不到對應的比賽");
     text.appendChild(name);
     text.appendChild(meta);
+    // 點文字也能勾，列很窄時勾選框不好點
+    text.style.cursor = check.disabled ? "default" : "pointer";
+    text.onclick = () => { if (!check.disabled) { check.checked = !check.checked; refresh(); } };
+
+    const category = document.createElement("select");
+    category.style.cssText = "width:auto;padding:5px 8px;font-size:12px";
+    for (const [value, label] of Object.entries(CATEGORIES)) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      category.appendChild(option);
+    }
+    category.value = guessCategory(s.title);
+    category.title = "分類（依標題預先猜測）";
 
     const use = document.createElement("button");
     use.className = "ghost";
     use.textContent = "帶入表單";
     use.onclick = () => {
       // 一檔主題日通常橫跨連續數場，整段一起帶入
-      const matches = games.filter((g) =>
+      const picked = games.filter((g) =>
         g.home_code === s.homeCode && s.dates.indexOf(g.game_date) >= 0
       );
-      if (matches.length === 0) {
+      if (picked.length === 0) {
         return say($("sugMsg"), "找不到「" + s.title + "」對應的比賽", false);
       }
       $("gameTeam").value = s.homeCode;
       renderGameOptions();
-      selectGames(matches.map((g) => g.kind_code + "/" + g.game_sno));
+      selectGames(picked.map((g) => g.kind_code + "/" + g.game_sno));
       $("title").value = s.title;
       $("subtitle").value = "";
-      say($("sugMsg"), "已帶入 " + matches.length + " 場，請確認分類後儲存", true);
+      $("category").value = category.value;
+      say($("sugMsg"), "已帶入 " + picked.length + " 場，請確認分類後儲存", true);
       window.scrollTo({ top: 0, behavior: "smooth" });
     };
 
+    box.appendChild(check);
     box.appendChild(text);
+    box.appendChild(category);
     box.appendChild(use);
-    $("sugList").appendChild(box);
+    root.appendChild(box);
+    rows.push({ s, check, category, matches, box });
   }
-};
 
+  refresh();
+
+  addPicked.onclick = async () => {
+    const picked = rows.filter((r) => r.check.checked && !r.check.disabled);
+    if (!picked.length) return;
+    const total = picked.reduce((n, r) => n + [...r.matches.values()].reduce((m, l) => m + l.length, 0), 0);
+    if (!confirm("新增 " + picked.length + " 檔主題日（共 " + total + " 場比賽）？\n\n不會發送推播。需要推播的話，之後在上方表單勾選推播再儲存一次。")) return;
+
+    addPicked.disabled = true;
+    all.disabled = true;
+    const failed = [];
+    let saved = 0;
+    for (const r of picked) {
+      try {
+        // 分類不同的比賽（例行賽、季後賽）要分開存
+        for (const [kindCode, gameSnos] of r.matches) {
+          await call("/themes", {
+            method: "POST",
+            body: JSON.stringify({
+              year: $("year").value,
+              kindCode,
+              gameSnos,
+              category: r.category.value,
+              title: r.s.title,
+              subtitle: r.s.subtitle || "",
+              sourceUrl: r.s.sourceUrl || "",
+              notify: false,
+            }),
+          });
+        }
+        saved++;
+        r.box.style.opacity = "0.4";
+        r.check.checked = false;
+        r.check.disabled = true;
+      } catch (e) {
+        failed.push("「" + r.s.title + "」" + e.message);
+      }
+      addPicked.textContent = "新增中… " + (saved + failed.length) + " / " + picked.length;
+    }
+    all.disabled = false;
+    refresh();
+    await loadThemes();
+    if (failed.length) {
+      say($("sugMsg"), "已新增 " + saved + " 檔，失敗 " + failed.length + " 檔：" + failed.join("；"), false);
+    } else {
+      say($("sugMsg"), "已新增 " + saved + " 檔主題日。下次讀取建議時就不會再出現。", true);
+    }
+  };
+}
 
 // ---------------------------------------------------------------- 推播
 
