@@ -121,6 +121,7 @@
     <button class="tab" data-pane="community">聊天室與檢舉</button>
     <button class="tab" data-pane="push">推播</button>
     <button class="tab" data-pane="members">會員與額度</button>
+    <button class="tab" data-pane="achievements">成就</button>
   </nav>
 
   <div class="pane" id="pane-themes">
@@ -429,6 +430,51 @@
   </section>
   </div>
 
+  <div class="pane hide" id="pane-achievements">
+  <section>
+    <h2>新增 / 修改成就</h2>
+    <p class="note">改完 App 下次開啟就會套用，不需要更新 App。
+      等級看的是累積經驗值；每個成就預設 10 點，Lv.1 需要 10 點、Lv.20 需要 580 點。
+      <b>代號</b>會存進使用者的紀錄，建立後就不要再改。</p>
+    <div class="row">
+      <div><label>代號（英數）</label><input id="achId" placeholder="games100"></div>
+      <div><label>分類</label><select id="achGroup"></select></div>
+      <div><label>排序（小的在前）</label><input id="achSort" type="number" value="9999"></div>
+    </div>
+    <div class="row">
+      <div><label>名稱（12 字內）</label><input id="achTitle" maxlength="12"></div>
+      <div><label>圖示（SF Symbols 名稱）</label><input id="achSymbol" placeholder="star"></div>
+    </div>
+    <label>說明（40 字內）</label><input id="achDetail" maxlength="40">
+    <div class="row">
+      <div><label>算法</label><select id="achMetric"></select></div>
+      <div><label>門檻</label><input id="achTarget" type="number" min="1" value="1"></div>
+      <div><label>經驗值</label><input id="achXp" type="number" min="0" value="10"></div>
+    </div>
+    <div class="check"><input type="checkbox" id="achCheckin"><label for="achCheckin">需要打卡（顯示「需打卡」標籤）</label></div>
+    <div class="check"><input type="checkbox" id="achEnabled" checked><label for="achEnabled">啟用（取消勾選就是暫時下架，已取得的人紀錄保留）</label></div>
+    <div class="actions">
+      <button id="saveAch">儲存</button>
+      <button class="ghost" id="resetAch">清空表單</button>
+    </div>
+    <div id="achMsg"></div>
+  </section>
+
+  <section>
+    <h2>全部成就</h2>
+    <div class="filters">
+      <div><label>分類</label><select id="achFilter"><option value="">全部</option></select></div>
+      <div style="flex:0"><button class="ghost" id="loadAch" style="width:auto">重新整理</button></div>
+    </div>
+    <p class="note" id="achTotal"></p>
+    <table>
+      <thead><tr><th>成就</th><th>算法 / 門檻</th><th style="width:90px">經驗值</th><th></th></tr></thead>
+      <tbody id="achRows"></tbody>
+    </table>
+    <div id="achListMsg"></div>
+  </section>
+  </div>
+
 </div>
 </main>
 
@@ -503,6 +549,7 @@ const loaders = {
   push:      async () => { fillPushTeams(); await refreshAudience(); await loadCampaigns();
                            await loadNewsSettings(); await loadTemplates(); },
   members:   async () => { await loadGrants(); await loadSettings(); },
+  achievements: async () => { await loadAchievements(); },
 };
 const loaded = new Set();
 
@@ -1901,6 +1948,114 @@ async function loadTemplates() {
 
 const { data: session } = await sb.auth.getSession();
 if (session.session) await enter();
+
+// ---------------------------------------------------------------- 成就
+
+let achData = { achievements: [], metrics: {}, groups: {} };
+
+async function loadAchievements() {
+  try {
+    achData = await call("/achievements");
+  } catch (e) {
+    return say($("achListMsg"), "讀取失敗：" + e.message, false);
+  }
+  if (!$("achGroup").options.length) {
+    for (const [key, name] of Object.entries(achData.groups)) {
+      $("achGroup").add(new Option(name, key));
+      $("achFilter").add(new Option(name, key));
+    }
+    for (const [key, m] of Object.entries(achData.metrics)) {
+      $("achMetric").add(new Option(m.label + "（" + m.unit + "）", key));
+    }
+  }
+  renderAchievements();
+}
+
+function renderAchievements() {
+  const wanted = $("achFilter").value;
+  const rows = achData.achievements.filter((a) => !wanted || a.grp === wanted);
+  const body = $("achRows");
+  body.innerHTML = "";
+  const live = achData.achievements.filter((a) => a.enabled);
+  $("achTotal").textContent = "啟用中 " + live.length + " 個，全部完成共 "
+    + live.reduce((n, a) => n + a.xp, 0) + " 點經驗值。";
+  for (const a of rows) {
+    const tr = document.createElement("tr");
+    const metric = achData.metrics[a.metric];
+    const name = document.createElement("td");
+    name.innerHTML = "<b></b><span class='tag'></span><div class='note'></div>";
+    name.querySelector("b").textContent = a.title;
+    name.querySelector(".tag").textContent = (achData.groups[a.grp] || a.grp) + (a.enabled ? "" : "・已停用");
+    name.querySelector(".note").textContent = a.detail + "　(" + a.id + ")";
+    const rule = document.createElement("td");
+    rule.textContent = metric ? metric.label + " ≥ " + a.target + " " + metric.unit : a.metric + " ≥ " + a.target;
+    const xp = document.createElement("td");
+    const input = document.createElement("input");
+    input.type = "number"; input.min = "0"; input.value = a.xp; input.style.width = "80px";
+    input.onchange = async () => {
+      try {
+        await call("/achievements", { method: "POST", body: JSON.stringify(Object.assign({}, a, { xp: Number(input.value) })) });
+        a.xp = Number(input.value);
+        say($("achListMsg"), "「" + a.title + "」經驗值改為 " + a.xp, true);
+        renderAchievements();
+      } catch (e) { say($("achListMsg"), e.message, false); input.value = a.xp; }
+    };
+    xp.append(input);
+    const ops = document.createElement("td");
+    ops.innerHTML = "<div class='mini'><button class='ghost'>修改</button><button class='danger'>刪除</button></div>";
+    const [edit, remove] = ops.querySelectorAll("button");
+    edit.onclick = () => fillAchievement(a);
+    remove.onclick = async () => {
+      if (!confirm("刪除「" + a.title + "」？已取得的使用者也會看不到，等級可能下降。\n只想暫時下架請改用「停用」。")) return;
+      try {
+        await call("/achievements?id=" + encodeURIComponent(a.id), { method: "DELETE" });
+        say($("achListMsg"), "已刪除「" + a.title + "」", true);
+        await loadAchievements();
+      } catch (e) { say($("achListMsg"), e.message, false); }
+    };
+    tr.append(name, rule, xp, ops);
+    body.append(tr);
+  }
+}
+
+function fillAchievement(a) {
+  $("achId").value = a.id;
+  $("achGroup").value = a.grp;
+  $("achSort").value = a.sort;
+  $("achTitle").value = a.title;
+  $("achSymbol").value = a.symbol;
+  $("achDetail").value = a.detail;
+  $("achMetric").value = a.metric;
+  $("achTarget").value = a.target;
+  $("achXp").value = a.xp;
+  $("achCheckin").checked = a.needs_checkin;
+  $("achEnabled").checked = a.enabled;
+  $("achId").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+$("resetAch").onclick = () => {
+  for (const id of ["achId", "achTitle", "achSymbol", "achDetail"]) $(id).value = "";
+  $("achSort").value = "9999"; $("achTarget").value = "1"; $("achXp").value = "10";
+  $("achCheckin").checked = false; $("achEnabled").checked = true;
+};
+
+$("saveAch").onclick = async () => {
+  const payload = {
+    id: $("achId").value.trim(), grp: $("achGroup").value, sort: Number($("achSort").value),
+    title: $("achTitle").value.trim(), symbol: $("achSymbol").value.trim(),
+    detail: $("achDetail").value.trim(), metric: $("achMetric").value,
+    target: Number($("achTarget").value), xp: Number($("achXp").value),
+    needs_checkin: $("achCheckin").checked, enabled: $("achEnabled").checked,
+  };
+  try {
+    await call("/achievements", { method: "POST", body: JSON.stringify(payload) });
+    say($("achMsg"), "已儲存「" + payload.title + "」", true);
+    await loadAchievements();
+  } catch (e) { say($("achMsg"), e.message, false); }
+};
+
+$("achFilter").onchange = renderAchievements;
+$("loadAch").onclick = loadAchievements;
 </script>
 </body>
 </html>
