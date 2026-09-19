@@ -392,6 +392,32 @@
 
   <div class="pane hide" id="pane-members">
   <section>
+    <h2>會員名單</h2>
+    <p class="note">所有已註冊的帳號。用 Apple 登入且選擇「隱藏我的電子郵件」的會員，信箱會是
+      <code>@privaterelay.appleid.com</code> 的轉寄地址。會員資料屬於個資，請勿截圖外流。</p>
+    <div class="filters">
+      <div style="flex:2"><label>搜尋</label><input id="memberSearch" placeholder="信箱、暱稱或預設暱稱"></div>
+      <div><label>篩選</label>
+        <select id="memberFilter">
+          <option value="all">全部</option>
+          <option value="pro">Pro（訂閱或贈送）</option>
+          <option value="sub">訂閱中</option>
+          <option value="grant">贈送中</option>
+          <option value="free">免費版</option>
+        </select></div>
+      <div style="flex:0"><button class="ghost" id="loadMembers" style="width:auto">重新整理</button></div>
+    </div>
+    <p class="note" id="memberSummary"></p>
+    <div style="overflow-x:auto">
+    <table>
+      <thead><tr><th>會員</th><th>球隊</th><th>身分</th><th>加入／最後登入</th><th></th></tr></thead>
+      <tbody id="memberRows"></tbody>
+    </table>
+    </div>
+    <div id="memberMsg"></div>
+  </section>
+
+  <section>
     <h2>贈送 Pro</h2>
     <p class="note">給測試人員、活動得獎者，或自己。對方必須先在 App 用 Apple 登入過一次
       才會有帳號；還沒登入過的話這裡查不到。天數留空或填 0 代表永久。
@@ -662,7 +688,7 @@ const loaders = {
   community: async () => { await loadRooms(); await loadReports(); await loadBans(); },
   push:      async () => { fillPushTeams(); await refreshAudience(); await loadCampaigns();
                            await loadNewsSettings(); await loadTemplates(); },
-  members:   async () => { await loadGrants(); await loadSettings(); },
+  members:   async () => { await loadMembers(); await loadGrants(); await loadSettings(); },
   achievements: async () => { await loadAchievements(); },
   exchange:  async () => { await loadExchange(); await loadExchangeBans(); },
   accounts:  async () => { await loadMe(); await loadAccounts(); },
@@ -2481,6 +2507,121 @@ $("addAdmin").onclick = async () => {
     await loadAccounts();
   } catch (e) { say($("accountMsg"), e.message, false); }
 };
+
+// ---------------------------------------------------------------- 會員名單
+
+let members = [];
+
+async function loadMembers() {
+  try { members = await call("/members"); } catch (e) { return say($("memberMsg"), "讀取失敗：" + e.message, false); }
+  renderMembers();
+}
+
+function badge(text, cls) {
+  const b = document.createElement("span");
+  b.className = "status " + (cls || "");
+  b.textContent = text;
+  b.style.marginRight = "4px";
+  return b;
+}
+
+function shortDate(iso) {
+  return iso ? new Date(iso).toLocaleDateString("zh-TW") : "—";
+}
+
+function renderMembers() {
+  const q = $("memberSearch").value.trim().toLowerCase();
+  const filter = $("memberFilter").value;
+  const list = members.filter((m) => {
+    if (q && ![m.email, m.nickname, m.defaultNickname].some((v) => (v || "").toLowerCase().includes(q))) return false;
+    if (filter === "pro") return m.pro;
+    if (filter === "sub") return m.subscription && m.subscription.active;
+    if (filter === "grant") return m.grant && m.grant.active;
+    if (filter === "free") return !m.pro;
+    return true;
+  });
+  const pro = members.filter((m) => m.pro).length;
+  const subs = members.filter((m) => m.subscription && m.subscription.active).length;
+  $("memberSummary").textContent = "共 " + members.length + " 位會員，Pro " + pro + " 位（訂閱 " + subs + "、贈送 " + (pro - subs) + "）。目前顯示 " + list.length + " 位。";
+
+  const body = $("memberRows");
+  body.innerHTML = "";
+  for (const m of list) {
+    const tr = document.createElement("tr");
+
+    const who = document.createElement("td");
+    const name = document.createElement("b");
+    name.textContent = m.nickname || m.defaultNickname || "（未設定暱稱）";
+    const mail = document.createElement("div");
+    mail.className = "note";
+    mail.textContent = (m.email || "（無信箱）") + (m.provider ? "・" + (m.provider === "apple" ? "Apple 登入" : m.provider) : "");
+    who.append(name, mail);
+    if (m.nickname && m.defaultNickname) {
+      const d = document.createElement("div"); d.className = "note"; d.textContent = "預設：" + m.defaultNickname; who.append(d);
+    }
+
+    const team = document.createElement("td");
+    team.textContent = m.team || "—";
+
+    const status = document.createElement("td");
+    if (m.admin) status.append(badge("管理員", "scheduled"));
+    if (m.subscription && m.subscription.active) {
+      const plan = /yearly/.test(m.subscription.product) ? "年訂閱" : "月訂閱";
+      status.append(badge(plan + (m.subscription.sandbox ? "（測試）" : ""), "sent"));
+      const d = document.createElement("div"); d.className = "note";
+      d.textContent = "到期 " + shortDate(m.subscription.expiresAt); status.append(d);
+    } else if (m.subscription) {
+      status.append(badge("訂閱已過期", "canceled"));
+    }
+    if (m.grant && m.grant.active) {
+      status.append(badge("贈送 Pro", "sent"));
+      const d = document.createElement("div"); d.className = "note";
+      d.textContent = (m.grant.until ? "到 " + shortDate(m.grant.until) : "永久") + (m.grant.note ? "・" + m.grant.note : "");
+      status.append(d);
+    }
+    if (!m.pro && !m.admin) status.append(badge("免費版"));
+
+    const dates = document.createElement("td");
+    dates.className = "note";
+    dates.textContent = shortDate(m.createdAt) + " ／ " + shortDate(m.lastSignIn);
+
+    const ops = document.createElement("td");
+    const btn = document.createElement("button");
+    btn.style.width = "auto"; btn.style.padding = "5px 12px"; btn.style.fontSize = "12px";
+    if (m.grant && m.grant.active) {
+      btn.className = "ghost"; btn.textContent = "取消贈送";
+      btn.onclick = async () => {
+        if (!confirm("取消 " + (m.nickname || m.email) + " 的贈送 Pro？")) return;
+        try {
+          await call("/grants?userId=" + encodeURIComponent(m.userId), { method: "DELETE" });
+          say($("memberMsg"), "已取消贈送", true);
+          await loadMembers(); await loadGrants();
+        } catch (e) { say($("memberMsg"), e.message, false); }
+      };
+    } else {
+      btn.textContent = "贈送 Pro";
+      btn.onclick = async () => {
+        const who = m.nickname || m.defaultNickname || m.email;
+        const days = prompt("贈送 " + who + " Pro 幾天？（0 或留空 = 永久）", "30");
+        if (days === null) return;
+        const note = prompt("備註（例：活動得獎、測試人員）", "") ?? "";
+        try {
+          await call("/grants", { method: "POST", body: JSON.stringify({ userId: m.userId, days: Number(days) || 0, note }) });
+          say($("memberMsg"), "已贈送 " + who + " Pro" + (Number(days) > 0 ? " " + Number(days) + " 天" : "（永久）"), true);
+          await loadMembers(); await loadGrants();
+        } catch (e) { say($("memberMsg"), e.message, false); }
+      };
+    }
+    ops.append(btn);
+
+    tr.append(who, team, status, dates, ops);
+    body.append(tr);
+  }
+}
+
+$("memberSearch").oninput = renderMembers;
+$("memberFilter").onchange = renderMembers;
+$("loadMembers").onclick = loadMembers;
 </script>
 </body>
 </html>
