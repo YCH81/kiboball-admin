@@ -1815,7 +1815,8 @@ async function loadCampaigns() {
     content.appendChild(strong);
     content.appendChild(document.createElement("br"));
     content.appendChild(document.createTextNode(row.body));
-    if (row.meta && row.meta.url) {
+    // 連結來自外部 RSS，只接受 http(s)，擋掉 javascript: 之類會在後台執行程式的網址
+    if (row.meta && /^https?:\/\//i.test(String(row.meta.url || ""))) {
       content.appendChild(document.createElement("br"));
       const link = document.createElement("a");
       link.href = row.meta.url;
