@@ -135,6 +135,7 @@
     <button class="tab" data-pane="members">會員與額度</button>
     <button class="tab" data-pane="achievements">成就</button>
     <button class="tab" data-pane="exchange">交換區</button>
+    <button class="tab" data-pane="permissions">使用者權限</button>
     <button class="tab" data-pane="accounts">帳號管理</button>
   </nav>
 
@@ -602,6 +603,32 @@
   </section>
   </div>
 
+  <div class="pane hide" id="pane-permissions">
+  <section>
+    <h2>使用者權限</h2>
+    <p class="note">關掉的權限立刻生效，對方下一次發言就會被擋下並看到說明。
+      「禁言」是有期限的處罰（聊天室由系統依違規自動加上，交換區在刪文時加上）；
+      這裡的開關是長期的，直到你再打開。沒有登入過 App 的帳號不會出現在這裡。</p>
+    <div class="filters">
+      <div style="flex:2"><label>搜尋</label><input id="permSearch" placeholder="信箱或暱稱"></div>
+      <div><label>篩選</label>
+        <select id="permFilter">
+          <option value="all">全部</option>
+          <option value="limited">有限制（權限關閉或禁言中）</option>
+        </select></div>
+      <div style="flex:0"><button class="ghost" id="loadPerms" style="width:auto">重新整理</button></div>
+    </div>
+    <p class="note" id="permSummary"></p>
+    <div style="overflow-x:auto">
+    <table>
+      <thead><tr><th>會員</th><th>比賽聊天室／主題</th><th>交換區</th><th>禁言中</th><th></th></tr></thead>
+      <tbody id="permRows"></tbody>
+    </table>
+    </div>
+    <div id="permMsg"></div>
+  </section>
+  </div>
+
 </div>
 </main>
 
@@ -623,6 +650,7 @@ let games = [];
 // 各分頁的資料。宣告放在最前面：自動登入時會先打開分頁，
 // 若宣告在檔案後段，分頁載入時變數還沒建立（Cannot access before initialization）
 let members = [];
+let perms = [];
 let exData = { posts: [], banDays: 3 };
 let achData = { achievements: [], metrics: {}, groups: {} };
 let enrolling = null;
@@ -710,6 +738,7 @@ const loaders = {
   achievements: async () => { await loadAchievements(); },
   exchange:  async () => { await loadExchange(); await loadExchangeBans(); },
   accounts:  async () => { await loadMe(); await loadAccounts(); },
+  permissions: async () => { await loadPerms(); },
 };
 const loaded = new Set();
 
@@ -1923,6 +1952,24 @@ async function loadCampaigns() {
       mini.appendChild(now);
       mini.appendChild(cancel);
       tools.appendChild(mini);
+    } else if (["sent", "failed", "canceled"].includes(row.status)) {
+      const del = document.createElement("button");
+      del.className = "ghost";
+      del.textContent = "刪除";
+      del.style.width = "auto"; del.style.padding = "5px 12px"; del.style.fontSize = "12px";
+      del.onclick = async () => {
+        const note = row.status === "sent"
+          ? "\n\n推播已經送到手機，收不回來；刪除後 App 的「通知」頁不會再顯示這則。" : "";
+        if (!confirm("刪除「" + row.title + "」？" + note)) return;
+        try {
+          await call("/campaigns?remove=1&id=" + row.id, { method: "DELETE" });
+          say($("campaignMsg"), "已刪除「" + row.title + "」", true);
+        } catch (e) {
+          say($("campaignMsg"), e.message, false);
+        }
+        await loadCampaigns();
+      };
+      tools.appendChild(del);
     }
     tr.appendChild(tools);
     body.appendChild(tr);
@@ -2685,6 +2732,132 @@ async function loadUserReports() {
   }
 }
 $("loadUserReports").onclick = loadUserReports;
+
+
+// ---------------------------------------------------------------- 使用者權限
+
+async function loadPerms() {
+  try { perms = await call("/permissions"); } catch (e) { return say($("permMsg"), "讀取失敗：" + e.message, false); }
+  renderPerms();
+}
+
+function untilText(iso) {
+  return iso ? "至 " + new Date(iso).toLocaleString("zh-TW", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "永久";
+}
+
+async function savePerm(p) {
+  await call("/permissions", { method: "POST", body: JSON.stringify({
+    userId: p.userId, canChat: p.canChat, canExchange: p.canExchange, note: p.note || "",
+  }) });
+}
+
+function permToggle(p, key, label) {
+  const td = document.createElement("td");
+  const box = document.createElement("label");
+  box.style.display = "flex"; box.style.alignItems = "center"; box.style.gap = "6px"; box.style.margin = "0";
+  const input = document.createElement("input");
+  input.type = "checkbox"; input.style.width = "auto"; input.checked = p[key];
+  const text = document.createElement("span");
+  const paint = () => { text.textContent = input.checked ? "可發言" : "已停權"; text.style.color = input.checked ? "var(--accent)" : "var(--danger)"; };
+  paint();
+  input.onchange = async () => {
+    const who = p.nickname || p.email || p.userId;
+    if (!input.checked && !confirm("停止 " + who + " 在「" + label + "」發言？")) { input.checked = true; return; }
+    const before = p[key];
+    p[key] = input.checked;
+    paint();
+    try {
+      await savePerm(p);
+      say($("permMsg"), who + "：" + label + (input.checked ? "已恢復" : "已停權"), true);
+    } catch (e) {
+      p[key] = before; input.checked = before; paint();
+      say($("permMsg"), e.message, false);
+    }
+  };
+  box.append(input, text);
+  td.append(box);
+  return td;
+}
+
+function renderPerms() {
+  const q = $("permSearch").value.trim().toLowerCase();
+  const onlyLimited = $("permFilter").value === "limited";
+  const limited = (p) => !p.canChat || !p.canExchange || p.chatBans.length || p.exchangeBans.length;
+  const list = perms.filter((p) => {
+    if (q && ![p.email, p.nickname].some((v) => (v || "").toLowerCase().includes(q))) return false;
+    return !onlyLimited || limited(p);
+  });
+  $("permSummary").textContent = "共 " + perms.length + " 位，有限制的 " + perms.filter(limited).length + " 位。";
+  const body = $("permRows");
+  body.innerHTML = "";
+  for (const p of list) {
+    const tr = document.createElement("tr");
+    const who = document.createElement("td");
+    const b = document.createElement("b"); b.textContent = p.nickname || "（未設定暱稱）";
+    const m = document.createElement("div"); m.className = "note"; m.textContent = p.email || p.userId;
+    who.append(b, m);
+    if (p.note) { const n = document.createElement("div"); n.className = "note"; n.textContent = "備註：" + p.note; who.append(n); }
+
+    const bans = document.createElement("td");
+    for (const ban of p.chatBans) {
+      const line = document.createElement("div");
+      line.className = "note";
+      line.textContent = "聊天室" + (ban.scoped ? "（單場）" : "") + " " + untilText(ban.until) + "：" + ban.reason + " ";
+      const lift = document.createElement("button");
+      lift.className = "ghost"; lift.textContent = "解除";
+      lift.style.width = "auto"; lift.style.padding = "2px 8px"; lift.style.fontSize = "11px";
+      lift.onclick = async () => {
+        try { await call("/bans?id=" + encodeURIComponent(ban.id), { method: "DELETE" }); await loadPerms(); }
+        catch (e) { say($("permMsg"), e.message, false); }
+      };
+      line.append(lift); bans.append(line);
+    }
+    for (const ban of p.exchangeBans) {
+      const line = document.createElement("div");
+      line.className = "note";
+      line.textContent = "交換區 " + untilText(ban.until) + "：" + ban.reason + " ";
+      const lift = document.createElement("button");
+      lift.className = "ghost"; lift.textContent = "解除";
+      lift.style.width = "auto"; lift.style.padding = "2px 8px"; lift.style.fontSize = "11px";
+      lift.onclick = async () => {
+        try { await call("/exchange-bans?id=" + encodeURIComponent(ban.id), { method: "DELETE" }); await loadPerms(); }
+        catch (e) { say($("permMsg"), e.message, false); }
+      };
+      line.append(lift); bans.append(line);
+    }
+    if (!p.chatBans.length && !p.exchangeBans.length) bans.textContent = "—";
+
+    const ops = document.createElement("td");
+    const wrap = document.createElement("div"); wrap.className = "mini";
+    const ban = document.createElement("button"); ban.className = "danger"; ban.textContent = "禁言";
+    ban.onclick = async () => {
+      const days = prompt("禁止 " + (p.nickname || p.email) + " 在比賽聊天室發言幾天？（0 = 永久）", "3");
+      if (days === null) return;
+      const reason = prompt("原因", "管理員禁言");
+      if (reason === null) return;
+      try {
+        await call("/bans", { method: "POST", body: JSON.stringify({ userId: p.userId, minutes: (Number(days) || 0) * 1440, reason }) });
+        say($("permMsg"), "已禁言", true);
+        await loadPerms();
+      } catch (e) { say($("permMsg"), e.message, false); }
+    };
+    const note = document.createElement("button"); note.className = "ghost"; note.textContent = "備註";
+    note.onclick = async () => {
+      const text = prompt("備註（只有後台看得到）", p.note || "");
+      if (text === null) return;
+      p.note = text;
+      try { await savePerm(p); renderPerms(); } catch (e) { say($("permMsg"), e.message, false); }
+    };
+    wrap.append(ban, note); ops.append(wrap);
+
+    tr.append(who, permToggle(p, "canChat", "比賽聊天室與主題"), permToggle(p, "canExchange", "交換區"), bans, ops);
+    body.append(tr);
+  }
+}
+
+$("permSearch").oninput = renderPerms;
+$("permFilter").onchange = renderPerms;
+$("loadPerms").onclick = loadPerms;
 
 // 已登入過就直接進後台。放在最後：要等所有分頁的程式都載入完，
 // 否則自動登入時打開的分頁會用到還沒建立的函式與變數
