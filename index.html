@@ -122,6 +122,7 @@
     <button class="tab" data-pane="push">推播</button>
     <button class="tab" data-pane="members">會員與額度</button>
     <button class="tab" data-pane="achievements">成就</button>
+    <button class="tab" data-pane="exchange">交換區</button>
   </nav>
 
   <div class="pane" id="pane-themes">
@@ -475,6 +476,35 @@
   </section>
   </div>
 
+  <div class="pane hide" id="pane-exchange">
+  <section>
+    <h2>交換區管理</h2>
+    <p class="note">這裡看得到交換區所有主題與留言（含被檢舉自動隱藏的）。
+      刪除時會推播通知作者，並可禁止他在交換區發文與留言幾天（比賽聊天室不受影響）。</p>
+    <div class="filters">
+      <div><label>顯示</label>
+        <select id="exFilter">
+          <option value="all">全部</option>
+          <option value="reported">有檢舉或已隱藏</option>
+        </select></div>
+      <div><label>刪文時預設禁言天數</label><input id="exBanDays" type="number" min="0" max="365"></div>
+      <div style="flex:0"><button class="ghost" id="exSaveDays" style="width:auto">儲存天數</button></div>
+      <div style="flex:0"><button class="ghost" id="exReload" style="width:auto">重新整理</button></div>
+    </div>
+    <div id="exMsg"></div>
+    <div id="exList"></div>
+  </section>
+
+  <section>
+    <h2>交換區禁言中</h2>
+    <table>
+      <thead><tr><th>使用者</th><th>原因</th><th>到期</th><th></th></tr></thead>
+      <tbody id="exBanRows"></tbody>
+    </table>
+    <p class="note hide" id="exNoBans">目前沒有人被禁言。</p>
+  </section>
+  </div>
+
 </div>
 </main>
 
@@ -550,6 +580,7 @@ const loaders = {
                            await loadNewsSettings(); await loadTemplates(); },
   members:   async () => { await loadGrants(); await loadSettings(); },
   achievements: async () => { await loadAchievements(); },
+  exchange:  async () => { await loadExchange(); await loadExchangeBans(); },
 };
 const loaded = new Set();
 
@@ -2056,6 +2087,166 @@ $("saveAch").onclick = async () => {
 
 $("achFilter").onchange = renderAchievements;
 $("loadAch").onclick = loadAchievements;
+
+// ---------------------------------------------------------------- 交換區
+
+let exData = { posts: [], banDays: 3 };
+
+async function loadExchange() {
+  try {
+    exData = await call("/exchange");
+  } catch (e) {
+    return say($("exMsg"), "讀取失敗：" + e.message, false);
+  }
+  $("exBanDays").value = exData.banDays;
+  renderExchange();
+}
+
+function when(iso) {
+  return new Date(iso).toLocaleString("zh-TW", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function renderExchange() {
+  const list = $("exList");
+  list.innerHTML = "";
+  const onlyReported = $("exFilter").value === "reported";
+  const topics = exData.posts.filter((p) => !p.parent_id);
+  const repliesOf = (id) => exData.posts.filter((p) => p.parent_id === id).reverse();
+  const flagged = (p) => p.hidden || p.pending_reports.length > 0;
+  let shown = 0;
+  for (const topic of topics) {
+    const replies = repliesOf(topic.id);
+    if (onlyReported && !flagged(topic) && !replies.some(flagged)) continue;
+    shown++;
+    const box = document.createElement("div");
+    box.className = "tpl";
+    box.append(postBlock(topic, true));
+    for (const r of replies) {
+      const wrap = postBlock(r, false);
+      wrap.style.marginLeft = "22px";
+      wrap.style.borderLeft = "3px solid var(--line)";
+      wrap.style.paddingLeft = "10px";
+      box.append(wrap);
+    }
+    list.append(box);
+  }
+  // 主題已刪、留言還在的情況不會發生（cascade），不必處理
+  if (!shown) list.innerHTML = '<p class="note">沒有符合的內容。</p>';
+}
+
+function postBlock(p, isTopic) {
+  const el = document.createElement("div");
+  el.style.margin = "8px 0";
+  const head = document.createElement("div");
+  head.innerHTML = "<b></b> <span class='note'></span>";
+  head.querySelector("b").textContent = isTopic ? (p.title || "（無標題）") : "留言";
+  head.querySelector(".note").textContent = "　" + p.nickname + "・" + when(p.created_at)
+    + (isTopic ? "・" + p.reply_count + " 則留言" : "");
+  if (p.hidden) head.insertAdjacentHTML("beforeend", "<span class='status failed'>已自動隱藏</span>");
+  if (p.pending_reports.length) {
+    const tag = document.createElement("span");
+    tag.className = "status scheduled";
+    tag.textContent = "檢舉 " + p.pending_reports.length + "：" + [...new Set(p.pending_reports)].join("、");
+    head.append(" ", tag);
+  }
+  const body = document.createElement("div");
+  body.style.whiteSpace = "pre-wrap";
+  body.style.fontSize = "14px";
+  body.textContent = p.body;
+  el.append(head, body);
+  if (p.photos.length) {
+    const pics = document.createElement("div");
+    pics.style.display = "flex"; pics.style.gap = "8px"; pics.style.margin = "6px 0";
+    for (const src of p.photos) {
+      const a = document.createElement("a");
+      a.href = src; a.target = "_blank";
+      const img = document.createElement("img");
+      img.src = src; img.style.width = "110px"; img.style.height = "110px";
+      img.style.objectFit = "cover"; img.style.borderRadius = "8px";
+      a.append(img); pics.append(a);
+    }
+    el.append(pics);
+  }
+  const ops = document.createElement("div");
+  ops.className = "mini";
+  ops.style.display = "flex"; ops.style.gap = "6px"; ops.style.marginTop = "4px";
+  const del = document.createElement("button");
+  del.className = "danger"; del.style.width = "auto"; del.style.padding = "5px 12px"; del.style.fontSize = "12px";
+  del.textContent = isTopic ? "刪除主題並通知樓主" : "刪除留言並通知作者";
+  del.onclick = () => deleteExchange(p, isTopic);
+  ops.append(del);
+  if (p.hidden || p.pending_reports.length) {
+    const ok = document.createElement("button");
+    ok.className = "ghost"; ok.style.width = "auto"; ok.style.padding = "5px 12px"; ok.style.fontSize = "12px";
+    ok.textContent = "檢舉不成立，恢復顯示";
+    ok.onclick = async () => {
+      try {
+        await call("/exchange", { method: "POST", body: JSON.stringify({ action: "restore", id: p.id }) });
+        say($("exMsg"), "已恢復顯示", true);
+        await loadExchange();
+      } catch (e) { say($("exMsg"), e.message, false); }
+    };
+    ops.append(ok);
+  }
+  el.append(ops);
+  return el;
+}
+
+async function deleteExchange(p, isTopic) {
+  const reason = prompt("刪除原因（會寫進通知裡）", "違反交換區發文規範");
+  if (reason === null) return;
+  const daysText = prompt("禁止作者在交換區發文與留言幾天？（0 = 不禁言）", String(exData.banDays));
+  if (daysText === null) return;
+  const days = Math.max(0, Math.floor(Number(daysText)) || 0);
+  const what = isTopic ? "你在交換區的主題「" + (p.title || "") + "」" : "你在交換區的留言";
+  const message = prompt("要推播給作者的通知（可修改）",
+    what + "違反發文規範（" + reason + "），已被刪除。" + (days > 0 ? days + " 天內不能在交換區發文與留言。" : ""));
+  if (message === null) return;
+  if (!confirm((isTopic ? "刪除這個主題（連同底下所有留言）" : "刪除這則留言") + "？" + (days > 0 ? "\n並禁言 " + days + " 天。" : ""))) return;
+  try {
+    const r = await call("/exchange", { method: "POST", body: JSON.stringify({
+      action: "delete", id: p.id, reason, banDays: days, notify: true, message,
+    }) });
+    say($("exMsg"), "已刪除" + (r.until ? "，禁言到 " + when(r.until) : "") + "，通知送到 " + r.pushed + " 台裝置"
+      + (r.pushed === 0 ? "（作者沒有開推播或沒有登入的裝置）" : ""), true);
+    await loadExchange();
+    await loadExchangeBans();
+  } catch (e) { say($("exMsg"), e.message, false); }
+}
+
+async function loadExchangeBans() {
+  let bans = [];
+  try { bans = await call("/exchange-bans"); } catch (e) { return say($("exMsg"), e.message, false); }
+  const body = $("exBanRows");
+  body.innerHTML = "";
+  show($("exNoBans"), !bans.length);
+  for (const b of bans) {
+    const tr = document.createElement("tr");
+    const cells = [b.nickname || b.user_id.slice(0, 8), b.reason, when(b.until)];
+    for (const c of cells) { const td = document.createElement("td"); td.textContent = c; tr.append(td); }
+    const td = document.createElement("td");
+    const lift = document.createElement("button");
+    lift.className = "ghost"; lift.textContent = "解除";
+    lift.onclick = async () => {
+      if (!confirm("提前解除禁言？")) return;
+      try { await call("/exchange-bans?id=" + encodeURIComponent(b.id), { method: "DELETE" }); await loadExchangeBans(); }
+      catch (e) { say($("exMsg"), e.message, false); }
+    };
+    td.append(lift); tr.append(td);
+    body.append(tr);
+  }
+}
+
+$("exFilter").onchange = renderExchange;
+$("exReload").onclick = async () => { await loadExchange(); await loadExchangeBans(); };
+$("exSaveDays").onclick = async () => {
+  const value = Math.max(0, Math.floor(Number($("exBanDays").value)) || 0);
+  try {
+    await call("/settings", { method: "POST", body: JSON.stringify({ key: "exchange_ban_days", value }) });
+    exData.banDays = value;
+    say($("exMsg"), "預設禁言天數改為 " + value + " 天", true);
+  } catch (e) { say($("exMsg"), e.message, false); }
+};
 </script>
 </body>
 </html>
