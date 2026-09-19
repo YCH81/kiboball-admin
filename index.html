@@ -279,6 +279,18 @@
   </section>
 
   <section>
+    <h2>被檢舉的使用者</h2>
+    <p class="note">從 App 的個人頁檢舉「這個人」（暱稱、頭像或整體行為）。確認違規可以禁言；處理完按「已處理」。</p>
+    <div class="actions"><button class="ghost" id="loadUserReports">重新整理</button></div>
+    <table>
+      <thead><tr><th>使用者</th><th>檢舉</th><th>理由</th><th></th></tr></thead>
+      <tbody id="userReportRows"></tbody>
+    </table>
+    <p class="note hide" id="noUserReports">目前沒有被檢舉的使用者。</p>
+    <div id="userReportMsg"></div>
+  </section>
+
+  <section>
     <h2>封禁中的使用者</h2>
     <p class="note">系統依違規階梯自動封禁：五分鐘、十分鐘、整場禁言；
       場次禁言連續三場則永久。這裡可以提前解除。</p>
@@ -691,7 +703,7 @@ async function enter() {
 /// 原本一登入就把七張表全撈一遍，多數時候只是要改一個主題日。
 const loaders = {
   themes:    async () => { await loadGames(); await loadThemes(); await loadSources(); },
-  community: async () => { await loadRooms(); await loadReports(); await loadBans(); },
+  community: async () => { await loadRooms(); await loadReports(); await loadUserReports(); await loadBans(); },
   push:      async () => { fillPushTeams(); await refreshAudience(); await loadCampaigns();
                            await loadNewsSettings(); await loadTemplates(); },
   members:   async () => { await loadMembers(); await loadGrants(); await loadSettings(); },
@@ -2627,6 +2639,52 @@ function renderMembers() {
 $("memberSearch").oninput = renderMembers;
 $("memberFilter").onchange = renderMembers;
 $("loadMembers").onclick = loadMembers;
+
+
+// ---------------------------------------------------------------- 被檢舉的使用者
+
+async function loadUserReports() {
+  let rows = [];
+  try { rows = await call("/user-reports"); } catch (e) { return say($("userReportMsg"), e.message, false); }
+  const body = $("userReportRows");
+  body.innerHTML = "";
+  show($("noUserReports"), !rows.length);
+  for (const r of rows) {
+    const tr = document.createElement("tr");
+    const who = document.createElement("td");
+    const b = document.createElement("b"); b.textContent = r.nickname || "（未設定暱稱）";
+    const m = document.createElement("div"); m.className = "note"; m.textContent = r.email || r.userId;
+    who.append(b, m);
+    const count = document.createElement("td"); count.textContent = r.count + " 人";
+    const reasons = document.createElement("td"); reasons.textContent = [...new Set(r.reasons)].join("、");
+    const ops = document.createElement("td");
+    const wrap = document.createElement("div"); wrap.className = "mini";
+    const ban = document.createElement("button"); ban.className = "danger"; ban.textContent = "禁言";
+    ban.onclick = async () => {
+      const days = prompt("禁止 " + (r.nickname || "這位使用者") + " 在比賽聊天室發言幾天？（0 = 永久）", "7");
+      if (days === null) return;
+      try {
+        await call("/bans", { method: "POST", body: JSON.stringify({
+          userId: r.userId, minutes: (Number(days) || 0) * 1440, reason: "使用者被檢舉：" + [...new Set(r.reasons)].join("、"),
+        }) });
+        await call("/user-reports?userId=" + encodeURIComponent(r.userId), { method: "DELETE" });
+        say($("userReportMsg"), "已禁言並結案", true);
+        await loadUserReports(); await loadBans();
+      } catch (e) { say($("userReportMsg"), e.message, false); }
+    };
+    const done = document.createElement("button"); done.className = "ghost"; done.textContent = "已處理";
+    done.onclick = async () => {
+      try {
+        await call("/user-reports?userId=" + encodeURIComponent(r.userId), { method: "DELETE" });
+        await loadUserReports();
+      } catch (e) { say($("userReportMsg"), e.message, false); }
+    };
+    wrap.append(ban, done); ops.append(wrap);
+    tr.append(who, count, reasons, ops);
+    body.append(tr);
+  }
+}
+$("loadUserReports").onclick = loadUserReports;
 
 // 已登入過就直接進後台。放在最後：要等所有分頁的程式都載入完，
 // 否則自動登入時打開的分頁會用到還沒建立的函式與變數
