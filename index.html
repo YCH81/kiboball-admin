@@ -2139,7 +2139,7 @@ function postBlock(p, isTopic) {
   el.style.margin = "8px 0";
   const head = document.createElement("div");
   head.innerHTML = "<b></b> <span class='note'></span>";
-  head.querySelector("b").textContent = isTopic ? (p.title || "（無標題）") : "留言";
+  head.querySelector("b").textContent = (p.pinned ? "📌 " : "") + (isTopic ? (p.title || "（無標題）") : "留言") + (p.locked ? "（不開放留言）" : "");
   head.querySelector(".note").textContent = "　" + p.nickname + "・" + when(p.created_at)
     + (isTopic ? "・" + p.reply_count + " 則留言" : "");
   if (p.hidden) head.insertAdjacentHTML("beforeend", "<span class='status failed'>已自動隱藏</span>");
@@ -2175,6 +2175,21 @@ function postBlock(p, isTopic) {
   del.textContent = isTopic ? "刪除主題並通知樓主" : "刪除留言並通知作者";
   del.onclick = () => deleteExchange(p, isTopic);
   ops.append(del);
+  if (isTopic) {
+    const pin = document.createElement("button");
+    pin.className = "ghost"; pin.style.width = "auto"; pin.style.padding = "5px 12px"; pin.style.fontSize = "12px";
+    pin.textContent = p.pinned ? "取消置頂" : "置頂";
+    pin.onclick = async () => {
+      const pinned = !p.pinned;
+      const locked = pinned ? confirm("置頂後要關閉留言嗎？（規範文建議關閉）") : false;
+      try {
+        await call("/exchange", { method: "POST", body: JSON.stringify({ action: "pin", id: p.id, pinned, locked }) });
+        say($("exMsg"), pinned ? "已置頂" : "已取消置頂", true);
+        await loadExchange();
+      } catch (e) { say($("exMsg"), e.message, false); }
+    };
+    ops.append(pin);
+  }
   if (p.hidden || p.pending_reports.length) {
     const ok = document.createElement("button");
     ok.className = "ghost"; ok.style.width = "auto"; ok.style.padding = "5px 12px"; ok.style.fontSize = "12px";
