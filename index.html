@@ -113,6 +113,18 @@
   <div id="loginMsg"></div>
 </section>
 
+<section id="mfaPane" class="hide">
+  <h2>兩步驟驗證</h2>
+  <p class="note">請打開手機上的驗證器 App（Google Authenticator 或 iPhone「密碼」App），輸入 Ki Bo Ball 後台的 6 位數驗證碼。</p>
+  <label for="mfaCode">驗證碼</label>
+  <input id="mfaCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456">
+  <div class="actions">
+    <button id="mfaVerify">驗證</button>
+    <button class="ghost" id="mfaCancel">改用其他帳號</button>
+  </div>
+  <div id="mfaMsg"></div>
+</section>
+
 <div id="app" class="hide">
 
 
@@ -123,6 +135,7 @@
     <button class="tab" data-pane="members">會員與額度</button>
     <button class="tab" data-pane="achievements">成就</button>
     <button class="tab" data-pane="exchange">交換區</button>
+    <button class="tab" data-pane="accounts">帳號管理</button>
   </nav>
 
   <div class="pane" id="pane-themes">
@@ -505,6 +518,52 @@
   </section>
   </div>
 
+  <div class="pane hide" id="pane-accounts">
+  <section>
+    <h2>我的帳號</h2>
+    <p class="note" id="meEmail"></p>
+    <h3 style="font-size:14px;margin:16px 0 4px">兩步驟驗證</h3>
+    <p class="note" id="mfaStatus">讀取中…</p>
+    <div id="mfaEnroll" class="hide">
+      <p class="note">1. 用驗證器 App 掃描這個 QR Code（Google Authenticator，或 iPhone「設定 → 密碼」裡的驗證碼）。</p>
+      <div id="mfaQr" style="width:180px;height:180px;background:#fff;padding:8px;border:1px solid var(--line);border-radius:8px"></div>
+      <p class="note">無法掃描時手動輸入金鑰：<code id="mfaSecret"></code></p>
+      <label>2. 輸入 App 顯示的 6 位數驗證碼</label>
+      <input id="mfaEnrollCode" inputmode="numeric" maxlength="6">
+      <div class="actions"><button id="mfaEnrollVerify">啟用</button><button class="ghost" id="mfaEnrollCancel">取消</button></div>
+    </div>
+    <div class="actions">
+      <button id="mfaStart" class="hide">啟用兩步驟驗證</button>
+      <button id="mfaRemove" class="danger hide">關閉兩步驟驗證</button>
+    </div>
+    <div id="mfaSetupMsg"></div>
+
+    <h3 style="font-size:14px;margin:22px 0 4px">修改密碼</h3>
+    <div class="row">
+      <div><label>新密碼（至少 10 字，含英文與數字）</label><input id="newPw" type="password" autocomplete="new-password"></div>
+      <div><label>再輸入一次</label><input id="newPw2" type="password" autocomplete="new-password"></div>
+    </div>
+    <div class="actions"><button id="changePw">修改密碼</button></div>
+    <div id="pwMsg"></div>
+  </section>
+
+  <section>
+    <h2>後台帳號</h2>
+    <p class="note">這些帳號可以登入後台。建議每個人都啟用兩步驟驗證。移除只會拿掉後台權限，不會刪除帳號。</p>
+    <table>
+      <thead><tr><th>帳號</th><th>兩步驟驗證</th><th>最後登入</th><th></th></tr></thead>
+      <tbody id="accountRows"></tbody>
+    </table>
+    <h3 style="font-size:14px;margin:22px 0 4px">新增後台帳號</h3>
+    <div class="row">
+      <div><label>Email</label><input id="newAdminEmail" type="email"></div>
+      <div><label>初始密碼（信箱還沒有帳號時才需要）</label><input id="newAdminPw" type="password" autocomplete="new-password"></div>
+    </div>
+    <div class="actions"><button id="addAdmin">新增</button></div>
+    <div id="accountMsg"></div>
+  </section>
+  </div>
+
 </div>
 </main>
 
@@ -551,8 +610,33 @@ $("signIn").onclick = async () => {
     password: $("password").value,
   });
   if (error) return say($("loginMsg"), error.message, false);
-  await enter();
+  await gate();
 };
+
+/// 有啟用兩步驟驗證的帳號，密碼通過後還要輸入驗證碼才進得去
+async function gate() {
+  const { data } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (data && data.nextLevel === "aal2" && data.currentLevel !== "aal2") {
+    show($("loginPane"), false);
+    show($("mfaPane"), true);
+    $("mfaCode").focus();
+    return;
+  }
+  show($("mfaPane"), false);
+  await enter();
+}
+
+$("mfaVerify").onclick = async () => {
+  const code = $("mfaCode").value.trim();
+  const { data: factors } = await sb.auth.mfa.listFactors();
+  const factor = (factors?.totp || []).find((f) => f.status === "verified");
+  if (!factor) return say($("mfaMsg"), "找不到驗證器，請重新登入", false);
+  const { error } = await sb.auth.mfa.challengeAndVerify({ factorId: factor.id, code });
+  if (error) return say($("mfaMsg"), "驗證碼不正確或已過期", false);
+  await gate();
+};
+$("mfaCode").onkeydown = (e) => { if (e.key === "Enter") $("mfaVerify").click(); };
+$("mfaCancel").onclick = async () => { await sb.auth.signOut(); location.reload(); };
 
 $("signOut").onclick = async () => { await sb.auth.signOut(); location.reload(); };
 
@@ -581,6 +665,7 @@ const loaders = {
   members:   async () => { await loadGrants(); await loadSettings(); },
   achievements: async () => { await loadAchievements(); },
   exchange:  async () => { await loadExchange(); await loadExchangeBans(); },
+  accounts:  async () => { await loadMe(); await loadAccounts(); },
 };
 const loaded = new Set();
 
@@ -1978,7 +2063,7 @@ async function loadTemplates() {
 // ---------------------------------------------------------------- 啟動
 
 const { data: session } = await sb.auth.getSession();
-if (session.session) await enter();
+if (session.session) await gate();
 
 // ---------------------------------------------------------------- 成就
 
@@ -2261,6 +2346,139 @@ $("exSaveDays").onclick = async () => {
     exData.banDays = value;
     say($("exMsg"), "預設禁言天數改為 " + value + " 天", true);
   } catch (e) { say($("exMsg"), e.message, false); }
+};
+
+// ---------------------------------------------------------------- 帳號管理
+
+let enrolling = null;
+
+async function loadMe() {
+  const { data } = await sb.auth.getUser();
+  $("meEmail").textContent = "登入帳號：" + (data.user ? data.user.email : "");
+  const { data: factors } = await sb.auth.mfa.listFactors();
+  const verified = (factors?.totp || []).filter((f) => f.status === "verified");
+  $("mfaStatus").textContent = verified.length
+    ? "已啟用。登入時除了密碼，還要輸入驗證器 App 的 6 位數驗證碼。"
+    : "尚未啟用。建議啟用：就算密碼外洩，沒有你的手機也登不進來。";
+  show($("mfaStart"), !verified.length && !enrolling);
+  show($("mfaRemove"), verified.length > 0);
+}
+
+$("mfaStart").onclick = async () => {
+  // 先清掉之前沒完成的設定，否則會卡在「已經有同名的驗證器」
+  const { data: old } = await sb.auth.mfa.listFactors();
+  for (const f of (old?.all || []).filter((f) => f.status !== "verified")) {
+    await sb.auth.mfa.unenroll({ factorId: f.id });
+  }
+  const { data, error } = await sb.auth.mfa.enroll({ factorType: "totp", friendlyName: "Ki Bo Ball 後台" });
+  if (error) return say($("mfaSetupMsg"), error.message, false);
+  enrolling = data;
+  $("mfaQr").innerHTML = "";
+  const img = document.createElement("img");
+  img.src = data.totp.qr_code;
+  img.style.width = "100%"; img.style.height = "100%";
+  $("mfaQr").append(img);
+  $("mfaSecret").textContent = data.totp.secret;
+  show($("mfaEnroll"), true);
+  show($("mfaStart"), false);
+};
+
+$("mfaEnrollVerify").onclick = async () => {
+  if (!enrolling) return;
+  const { error } = await sb.auth.mfa.challengeAndVerify({
+    factorId: enrolling.id, code: $("mfaEnrollCode").value.trim(),
+  });
+  if (error) return say($("mfaSetupMsg"), "驗證碼不正確，請確認手機時間正確後再試一次", false);
+  enrolling = null;
+  show($("mfaEnroll"), false);
+  $("mfaEnrollCode").value = "";
+  say($("mfaSetupMsg"), "已啟用兩步驟驗證。下次登入時會要求輸入驗證碼。", true);
+  await loadMe();
+  await loadAccounts();
+};
+
+$("mfaEnrollCancel").onclick = async () => {
+  if (enrolling) await sb.auth.mfa.unenroll({ factorId: enrolling.id });
+  enrolling = null;
+  show($("mfaEnroll"), false);
+  await loadMe();
+};
+
+$("mfaRemove").onclick = async () => {
+  if (!confirm("關閉兩步驟驗證？之後只要密碼就能登入後台，安全性會降低。")) return;
+  const { data } = await sb.auth.mfa.listFactors();
+  for (const f of (data?.totp || [])) {
+    const { error } = await sb.auth.mfa.unenroll({ factorId: f.id });
+    if (error) return say($("mfaSetupMsg"), error.message, false);
+  }
+  say($("mfaSetupMsg"), "已關閉兩步驟驗證", true);
+  await sb.auth.refreshSession();
+  await loadMe();
+  await loadAccounts();
+};
+
+$("changePw").onclick = async () => {
+  const pw = $("newPw").value;
+  if (pw !== $("newPw2").value) return say($("pwMsg"), "兩次輸入的密碼不一樣", false);
+  if (pw.length < 10 || !/[A-Za-z]/.test(pw) || !/\d/.test(pw)) {
+    return say($("pwMsg"), "密碼至少 10 個字元，且要同時包含英文字母與數字", false);
+  }
+  const { error } = await sb.auth.updateUser({ password: pw });
+  if (error) return say($("pwMsg"), error.message, false);
+  $("newPw").value = ""; $("newPw2").value = "";
+  say($("pwMsg"), "密碼已更新", true);
+};
+
+async function loadAccounts() {
+  let list = [];
+  try { list = await call("/accounts"); } catch (e) { return say($("accountMsg"), e.message, false); }
+  const body = $("accountRows");
+  body.innerHTML = "";
+  for (const a of list) {
+    const tr = document.createElement("tr");
+    const who = document.createElement("td");
+    who.textContent = a.email + (a.self ? "（你）" : "");
+    const mfa = document.createElement("td");
+    mfa.innerHTML = a.mfa ? "<span class='status sent'>已啟用</span>" : "<span class='status failed'>未啟用</span>";
+    const last = document.createElement("td");
+    last.textContent = a.lastSignIn ? new Date(a.lastSignIn).toLocaleString("zh-TW") : "從未登入";
+    const ops = document.createElement("td");
+    if (!a.self) {
+      const wrap = document.createElement("div"); wrap.className = "mini";
+      const reset = document.createElement("button"); reset.className = "ghost"; reset.textContent = "重設密碼";
+      reset.onclick = async () => {
+        const pw = prompt("為 " + a.email + " 設定新密碼（至少 10 字，含英文與數字）");
+        if (!pw) return;
+        try {
+          await call("/account-password", { method: "POST", body: JSON.stringify({ userId: a.userId, password: pw }) });
+          say($("accountMsg"), "已重設 " + a.email + " 的密碼，請用安全的方式告訴對方", true);
+        } catch (e) { say($("accountMsg"), e.message, false); }
+      };
+      const remove = document.createElement("button"); remove.className = "danger"; remove.textContent = "移除權限";
+      remove.onclick = async () => {
+        if (!confirm("移除 " + a.email + " 的後台權限？")) return;
+        try {
+          await call("/accounts?id=" + encodeURIComponent(a.userId), { method: "DELETE" });
+          await loadAccounts();
+        } catch (e) { say($("accountMsg"), e.message, false); }
+      };
+      wrap.append(reset, remove); ops.append(wrap);
+    }
+    tr.append(who, mfa, last, ops);
+    body.append(tr);
+  }
+}
+
+$("addAdmin").onclick = async () => {
+  const email = $("newAdminEmail").value.trim();
+  const password = $("newAdminPw").value;
+  if (!email) return say($("accountMsg"), "請輸入 Email", false);
+  try {
+    await call("/accounts", { method: "POST", body: JSON.stringify({ email, password }) });
+    $("newAdminEmail").value = ""; $("newAdminPw").value = "";
+    say($("accountMsg"), "已新增 " + email + "，請對方登入後到「帳號管理」啟用兩步驟驗證", true);
+    await loadAccounts();
+  } catch (e) { say($("accountMsg"), e.message, false); }
 };
 </script>
 </body>
