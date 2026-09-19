@@ -608,6 +608,12 @@ function say(target, text, ok) {
 }
 
 let games = [];
+// 各分頁的資料。宣告放在最前面：自動登入時會先打開分頁，
+// 若宣告在檔案後段，分頁載入時變數還沒建立（Cannot access before initialization）
+let members = [];
+let exData = { posts: [], banDays: 3 };
+let achData = { achievements: [], metrics: {}, groups: {} };
+let enrolling = null;
 
 async function token() {
   const { data } = await sb.auth.getSession();
@@ -2089,12 +2095,11 @@ async function loadTemplates() {
 
 // ---------------------------------------------------------------- 啟動
 
-const { data: session } = await sb.auth.getSession();
-if (session.session) await gate();
+
 
 // ---------------------------------------------------------------- 成就
 
-let achData = { achievements: [], metrics: {}, groups: {} };
+
 
 async function loadAchievements() {
   try {
@@ -2202,7 +2207,7 @@ $("loadAch").onclick = loadAchievements;
 
 // ---------------------------------------------------------------- 交換區
 
-let exData = { posts: [], banDays: 3 };
+
 
 async function loadExchange() {
   try {
@@ -2377,7 +2382,7 @@ $("exSaveDays").onclick = async () => {
 
 // ---------------------------------------------------------------- 帳號管理
 
-let enrolling = null;
+
 
 async function loadMe() {
   const { data } = await sb.auth.getUser();
@@ -2510,7 +2515,7 @@ $("addAdmin").onclick = async () => {
 
 // ---------------------------------------------------------------- 會員名單
 
-let members = [];
+
 
 async function loadMembers() {
   try { members = await call("/members"); } catch (e) { return say($("memberMsg"), "讀取失敗：" + e.message, false); }
@@ -2622,6 +2627,11 @@ function renderMembers() {
 $("memberSearch").oninput = renderMembers;
 $("memberFilter").onchange = renderMembers;
 $("loadMembers").onclick = loadMembers;
+
+// 已登入過就直接進後台。放在最後：要等所有分頁的程式都載入完，
+// 否則自動登入時打開的分頁會用到還沒建立的函式與變數
+const { data: session } = await sb.auth.getSession();
+if (session.session) await gate();
 </script>
 </body>
 </html>
